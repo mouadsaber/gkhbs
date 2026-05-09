@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="240" viewBox="0 0 900 240" fill="none">
+  <title>GKH</title>
+  <desc>Logo GKH (emblème + wordmark)</desc>
+
+  <!-- Emblème -->
+  <g transform="translate(40,20)">
+    <circle cx="100" cy="100" r="88" stroke="#C9A24E" stroke-width="10"/>
+    <circle cx="100" cy="100" r="78" stroke="#C9A24E" stroke-width="2" opacity="0.35"/>
+
+    <!-- Monogramme géométrique (style premium, simple) -->
+    <path d="M62 60v80c0 10 8 18 18 18h40" stroke="#C9A24E" stroke-width="10" stroke-linecap="round"/>
+    <path d="M120 78H88c-10 0-18 8-18 18v0c0 10 8 18 18 18h22c10 0 18 8 18 18v0c0 10-8 18-18 18H72" stroke="#C9A24E" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M138 60v100" stroke="#C9A24E" stroke-width="10" stroke-linecap="round"/>
+    <path d="M138 110h40" stroke="#C9A24E" stroke-width="10" stroke-linecap="round"/>
+    <path d="M178 60v100" stroke="#C9A24E" stroke-width="10" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(270,0)">
+    <text x="0" y="160" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="160" font-weight="800" letter-spacing="2" fill="#0A0A0A">
+      GKH
+    </text>
+  </g>
+</svg>
+

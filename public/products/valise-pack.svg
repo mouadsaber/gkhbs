@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" rx="56" fill="#F3F4F6"/>
+  <rect x="220" y="260" width="280" height="470" rx="52" fill="#111827"/>
+  <rect x="470" y="210" width="300" height="520" rx="56" fill="#1F2937"/>
+  <rect x="740" y="290" width="240" height="440" rx="48" fill="#374151"/>
+  <circle cx="320" cy="742" r="22" fill="#0B1220"/>
+  <circle cx="560" cy="742" r="22" fill="#0B1220"/>
+  <circle cx="855" cy="742" r="22" fill="#0B1220"/>
+  <text x="600" y="845" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="44" fill="#111827">
+    Pack 3 Valises (Placeholder)
+  </text>
+</svg>
+

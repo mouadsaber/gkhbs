@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" rx="56" fill="#F3F4F6"/>
+  <rect x="260" y="300" width="680" height="360" rx="84" fill="#111827"/>
+  <rect x="380" y="260" width="440" height="80" rx="40" fill="#374151"/>
+  <circle cx="420" cy="480" r="26" fill="#6B7280"/>
+  <circle cx="520" cy="480" r="26" fill="#6B7280"/>
+  <circle cx="620" cy="480" r="26" fill="#6B7280"/>
+  <text x="600" y="845" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="44" fill="#111827">
+    Trousse Voyage (Placeholder)
+  </text>
+</svg>
+

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <title>GKH</title>
+  <circle cx="128" cy="128" r="112" fill="#ffffff"/>
+  <circle cx="128" cy="128" r="104" fill="none" stroke="#C9A24E" stroke-width="18"/>
+  <circle cx="128" cy="128" r="90" fill="none" stroke="#C9A24E" stroke-width="4" opacity="0.35"/>
+
+  <!-- Simplified gold monogram mark (favicon-safe) -->
+  <path d="M92 84v88c0 10 8 18 18 18h44" fill="none" stroke="#C9A24E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M154 86v104" fill="none" stroke="#C9A24E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M154 136h42" fill="none" stroke="#C9A24E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M196 86v104" fill="none" stroke="#C9A24E" stroke-width="16" stroke-linecap="round"/>
+  <path d="M142 98H112c-10 0-18 8-18 18s8 18 18 18h22c10 0 18 8 18 18s-8 18-18 18H96" fill="none" stroke="#C9A24E" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+

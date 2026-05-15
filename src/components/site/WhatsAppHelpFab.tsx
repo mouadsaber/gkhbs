@@ -8,13 +8,14 @@ export function WhatsAppHelpFab() {
   const href = `https://wa.me/${waNumber}`;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="fixed bottom-24 right-4 z-50 pointer-events-none sm:bottom-4">
       <Link
         href={href}
         target="_blank"
         rel="noopener noreferrer"
         aria-label="Besoin d’aide ? WhatsApp"
         className={[
+          "pointer-events-auto",
           "group inline-flex items-center gap-2 rounded-full bg-emerald-600 px-3 py-2",
           "text-sm font-semibold text-white shadow-lg shadow-emerald-600/15",
           "transition hover:bg-emerald-700 hover:shadow-xl hover:shadow-emerald-600/15",
@@ -42,4 +43,3 @@ export function WhatsAppHelpFab() {
     </div>
   );
 }
-

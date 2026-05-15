@@ -19,6 +19,21 @@ export function ProductCard({ product }: { product: Product }) {
     activeVariant?.images[0] ||
     product.variants[0]?.images[0] ||
     "/products/valise-cabine.svg";
+  const safeMainImage = mainImage && mainImage.trim().length ? mainImage : "/products/valise-cabine.svg";
+
+  const minPrice = (() => {
+    const sizes = product.sizes;
+    if (!sizes) return 0;
+    const vals = Object.values(sizes)
+      .map((s) => Number(s?.price || 0))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    return vals.length ? Math.min(...vals) : 0;
+  })();
+
+  function formatDh(value: number) {
+    const n = Number.isFinite(value) ? Math.round(value) : 0;
+    return `${n.toLocaleString("fr-FR")} DH`;
+  }
 
   function openProduct() {
     router.push(`/produit/${product.slug}`);
@@ -55,7 +70,7 @@ export function ProductCard({ product }: { product: Product }) {
       <div className="relative flex h-[230px] w-full items-center justify-center overflow-hidden bg-zinc-50 sm:h-[300px]">
         <div className="relative h-[95%] w-[95%]">
           <Image
-            src={mainImage}
+            src={safeMainImage}
             alt={product.name}
             fill
             className="object-contain object-center transition-opacity duration-300 ease-out"
@@ -115,6 +130,12 @@ export function ProductCard({ product }: { product: Product }) {
         <div className="mt-3 text-sm font-medium text-zinc-600">
           {product.stockText || "Stock limité"}
         </div>
+
+        {minPrice ? (
+          <div className="mt-2 text-sm font-semibold text-zinc-900">
+            À partir de <span className="text-[#009B5A]">{formatDh(minPrice)}</span>
+          </div>
+        ) : null}
 
         <div className="mt-auto grid gap-3 pt-4 sm:grid-cols-2">
           <Link

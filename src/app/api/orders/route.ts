@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-
-type OrdersStore = {
-  version: 1;
-  lastNumber: number;
-  orders: OrderRecord[];
-};
+import { isDbConfigured } from "@/lib/db";
+import { createOrderInDb } from "@/lib/ordersDb";
+import { getUploadsDir, safeUploadsFilename } from "@/lib/uploads";
 
 type OrderRecord = {
   orderNumber: string;
@@ -20,6 +17,7 @@ type OrderRecord = {
   productImage?: string;
   color: string;
   size: string;
+  unitPrice: number;
   quantity: number;
 };
 
@@ -27,38 +25,14 @@ type OrderPayload = Omit<OrderRecord, "orderNumber" | "createdAt"> & {
   quantity: number;
 };
 
-const STORE_PATH = path.join(process.cwd(), "storage", "orders.json");
-
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-function pad4(n: number) {
-  return String(n).padStart(4, "0");
-}
-
-async function readOrdersStore(): Promise<OrdersStore> {
-  try {
-    const raw = await readFile(STORE_PATH, "utf8");
-    const parsed = JSON.parse(raw) as OrdersStore;
-    if (
-      !parsed ||
-      parsed.version !== 1 ||
-      !Array.isArray(parsed.orders) ||
-      typeof parsed.lastNumber !== "number"
-    ) {
-      return { version: 1, lastNumber: 0, orders: [] };
-    }
-    return parsed;
-  } catch {
-    return { version: 1, lastNumber: 0, orders: [] };
-  }
-}
-
-async function writeOrdersStore(store: OrdersStore) {
-  const dir = path.dirname(STORE_PATH);
-  await mkdir(dir, { recursive: true });
-  await writeFile(STORE_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
+function maskSecret(value: string) {
+  if (!value) return "";
+  if (value.length <= 4) return "****";
+  return `${value.slice(0, 2)}****${value.slice(-2)}`;
 }
 
 export async function POST(req: Request) {
@@ -78,68 +52,94 @@ export async function POST(req: Request) {
   const productImage = (payload.productImage || "").trim();
   const color = (payload.color || "").trim();
   const size = (payload.size || "").trim();
+  const unitPriceRaw = (payload as unknown as { unitPrice?: number }).unitPrice;
+  const unitPrice = Number.isFinite(unitPriceRaw) ? Math.round(Number(unitPriceRaw)) : 0;
   const quantity = Number.isFinite(payload.quantity) ? Math.max(1, payload.quantity) : 1;
 
   if (!fullName || !phone || !city) return jsonError("missing_customer_fields", 400);
   if (!productName || !reference || !color || !size) return jsonError("missing_product_fields", 400);
+  if (!unitPrice || unitPrice <= 0) return jsonError("missing_unit_price", 400);
+
+  const subtotal = unitPrice * quantity;
 
   const host = process.env.SMTP_HOST;
   const portRaw = process.env.SMTP_PORT;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const orderEmail = process.env.ORDER_EMAIL || "contact@gkhbs.com";
-  const from = `"GKHBS Orders" <${process.env.SMTP_USER || ""}>`;
+  const from = process.env.SMTP_FROM || `"GKHBS Orders" <${user || ""}>`;
 
-  if (!host || !portRaw || !user || !pass) {
-    console.error(
-      "[orders] Email service not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ORDER_EMAIL in .env.local."
+  const requiredEnv: Array<[string, string | undefined]> = [
+    ["SMTP_HOST", host],
+    ["SMTP_PORT", portRaw],
+    ["SMTP_USER", user],
+    ["SMTP_PASS", pass],
+    ["ORDER_EMAIL", process.env.ORDER_EMAIL],
+    ["SMTP_FROM", process.env.SMTP_FROM],
+  ];
+  const missing = requiredEnv.filter(([, v]) => !String(v || "").trim()).map(([k]) => k);
+  if (missing.length) {
+    console.error("[orders] missing env:", missing);
+    return NextResponse.json(
+      { error: "missing_env", variable: missing[0] },
+      { status: 500 }
     );
-    return jsonError("Email service not configured", 500);
   }
 
   const port = Number(portRaw);
-  const secure = port === 465;
+  const secure = String(process.env.SMTP_PORT) === "465";
+  console.log("[orders] SMTP config:", {
+    host,
+    port,
+    secure,
+    user,
+    pass: maskSecret(pass || ""),
+    from,
+    orderEmail,
+  });
 
-  // Generate order number + persist order.
-  const store = await readOrdersStore();
-  const nextNumber = store.lastNumber + 1;
-  const orderNumber = `CMD-${pad4(nextNumber)}`;
-  const createdAt = new Date().toISOString();
-  const record: OrderRecord = {
-    orderNumber,
-    createdAt,
-    fullName,
-    phone,
-    city,
-    productName,
-    reference,
-    productImage: productImage || undefined,
-    color,
-    size,
-    quantity,
-  };
+  // Persist order in DB (required).
+  let orderNumber = "";
+  let createdAtIso = "";
 
-  const nextStore: OrdersStore = {
-    version: 1,
-    lastNumber: nextNumber,
-    orders: [record, ...store.orders],
-  };
-
-  await writeOrdersStore(nextStore);
+  if (!isDbConfigured()) {
+    console.error("[orders] DB not configured. Set DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.");
+    return jsonError("db_not_configured", 500);
+  }
+  try {
+    const created = await createOrderInDb({
+      fullName,
+      phone,
+      city,
+      productName,
+      reference,
+      productImage: productImage || undefined,
+      color,
+      size,
+      unitPrice,
+      subtotal,
+      quantity,
+    });
+    orderNumber = created.orderNumber;
+    createdAtIso = created.createdAt;
+  } catch (err) {
+    console.error("[orders] DB write failed:", err);
+    return jsonError("db_write_failed", 500);
+  }
 
   // Send email notification to admin.
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
+    host,
+    port,
     secure,
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user,
+      pass,
     },
   });
 
   const subject = `Nouvelle commande : #${orderNumber}`;
-  const dateText = new Date(createdAt).toLocaleString("fr-FR", {
+  const dateText = new Date(createdAtIso).toLocaleString("fr-FR", {
     timeZone: "Africa/Casablanca",
   });
 
@@ -156,7 +156,11 @@ export async function POST(req: Request) {
     `- Référence: ${reference}`,
     `- Couleur: ${color}`,
     `- Taille: ${size}`,
+    `- Prix unitaire: ${unitPrice} DH`,
     `- Quantité: ${quantity}`,
+    `- Sous-total: ${subtotal} DH`,
+    "",
+    `Total commande: ${subtotal} DH`,
     "",
     `Date: ${dateText}`,
     "",
@@ -167,8 +171,9 @@ export async function POST(req: Request) {
     "Livraison partout au Maroc",
   ].join("\n");
 
-  const productImageHtml = productImage
-    ? `<img src="${escapeHtml(productImage)}" alt="" width="88" height="88" style="display:block; width:88px; height:88px; object-fit:contain; background:#f4f4f5; border-radius:14px; border:1px solid #e4e4e7;" />`
+  const resolvedImageSrc = await resolveEmailImageSrc(req, productImage);
+  const productImageHtml = resolvedImageSrc
+    ? `<img src="${escapeHtml(resolvedImageSrc)}" alt="" width="88" height="88" style="display:block; width:88px; height:88px; object-fit:contain; background:#f4f4f5; border-radius:14px; border:1px solid #e4e4e7;" />`
     : `<div style="width:88px; height:88px; background:#f4f4f5; border-radius:14px; border:1px solid #e4e4e7;"></div>`;
 
   const html = `
@@ -191,8 +196,12 @@ export async function POST(req: Request) {
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse:collapse;">
         <thead>
           <tr>
-            <th align="left" style="font-size:18px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Produit</th>
-            <th align="right" style="font-size:18px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Quantité</th>
+            <th align="left" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Produit</th>
+            <th align="left" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Taille</th>
+            <th align="left" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Couleur</th>
+            <th align="right" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Prix unitaire</th>
+            <th align="right" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Quantité</th>
+            <th align="right" style="font-size:16px; color:#374151; padding:10px 0; border-bottom:1px solid #e5e7eb;">Sous-total</th>
           </tr>
         </thead>
         <tbody>
@@ -205,17 +214,39 @@ export async function POST(req: Request) {
                     ${escapeHtml(productName)}
                   </div>
                   <div style="font-size:14px; color:#6b7280;">
-                    Référence : ${escapeHtml(reference)}<br/>
-                    Couleur : ${escapeHtml(color)} · Taille : ${escapeHtml(size)}
+                    Référence : ${escapeHtml(reference)}
                   </div>
                 </div>
               </div>
             </td>
-            <td align="right" style="padding:16px 0; font-size:18px; color:#111827;">
+            <td style="padding:16px 0; font-size:16px; color:#111827;">
+              ${escapeHtml(size)}
+            </td>
+            <td style="padding:16px 0; font-size:16px; color:#111827;">
+              ${escapeHtml(color)}
+            </td>
+            <td align="right" style="padding:16px 0; font-size:16px; color:#111827; font-weight:700;">
+              ${unitPrice} DH
+            </td>
+            <td align="right" style="padding:16px 0; font-size:16px; color:#111827;">
               ×${quantity}
+            </td>
+            <td align="right" style="padding:16px 0; font-size:16px; color:#111827; font-weight:800;">
+              ${subtotal} DH
             </td>
           </tr>
         </tbody>
+      </table>
+
+      <div style="margin:16px 0; border-top:1px solid #e5e7eb;"></div>
+
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse:collapse;">
+        <tr>
+          <td style="padding:10px 0; font-size:18px; color:#374151;">Total commande :</td>
+          <td align="right" style="padding:10px 0; font-size:26px; color:#111827; font-weight:800;">
+            ${subtotal} DH
+          </td>
+        </tr>
       </table>
 
       <div style="margin:16px 0; border-top:1px solid #e5e7eb;"></div>
@@ -251,16 +282,16 @@ export async function POST(req: Request) {
 
     await transporter.sendMail({
       from,
-      to: process.env.ORDER_EMAIL || orderEmail,
+      to: orderEmail,
       subject,
       text,
       html,
     });
   } catch (err) {
-    console.error("[orders] send failed:", err);
+    console.error("ORDER_EMAIL_ERROR", err);
     const error = err as { message?: string } | null;
     return NextResponse.json(
-      { error: "send_failed", details: error?.message },
+      { error: "send_failed", detail: error?.message || "Unknown SMTP error" },
       { status: 500 }
     );
   }
@@ -275,4 +306,66 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+async function resolveEmailImageSrc(req: Request, input: string) {
+  const src = (input || "").trim();
+  if (!src) return "";
+  if (src.startsWith("data:")) return src;
+  if (src.startsWith("http://") || src.startsWith("https://")) return src;
+
+  const prodBase = "https://valisemaroc.com";
+
+  // If it's an uploads-path like "/uploads/xyz.png", try embedding from uploads dir first.
+  if (src.startsWith("/uploads/")) {
+    const filename = safeUploadsFilename(src.replace("/uploads/", ""));
+    const uploadsPath = path.join(getUploadsDir(), filename);
+    try {
+      const bytes = await readFile(uploadsPath);
+      const mime = guessMime(uploadsPath);
+      const b64 = bytes.toString("base64");
+      return `data:${mime};base64,${b64}`;
+    } catch (err) {
+      console.error("[orders] resolveEmailImageSrc uploads read failed", { uploadsPath, err });
+      // Emails need absolute URLs; enforce production domain for uploads.
+      return `${prodBase}${src}`;
+    }
+  }
+
+  // If it's another public-path like "/products/..", try embedding as base64.
+  if (src.startsWith("/")) {
+    const publicPath = path.join(process.cwd(), "public", src.replaceAll("/", path.sep));
+    try {
+      const bytes = await readFile(publicPath);
+      const mime = guessMime(publicPath);
+      const b64 = bytes.toString("base64");
+      return `data:${mime};base64,${b64}`;
+    } catch {
+      // Fallback to absolute URL if possible.
+      const origin = getRequestOrigin(req);
+      return origin ? `${origin}${src}` : "";
+    }
+  }
+
+  return "";
+}
+
+function getRequestOrigin(req: Request) {
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  const host =
+    req.headers.get("x-forwarded-host") ||
+    req.headers.get("host") ||
+    "";
+  if (!host) return "";
+  return `${proto}://${host}`;
+}
+
+function guessMime(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".svg") return "image/svg+xml";
+  return "application/octet-stream";
 }

@@ -79,3 +79,20 @@ export function trackLead(params: {
     currency,
   });
 }
+
+export function trackPurchase(params: {
+  contentName: string;
+  contentIds?: string[];
+  value?: number;
+  currency?: string;
+}) {
+  const f = fbq();
+  if (!f) return;
+  const { contentName, contentIds, value, currency = "MAD" } = params;
+  f("track", "Purchase", {
+    content_name: contentName,
+    content_ids: contentIds,
+    value,
+    currency,
+  });
+}

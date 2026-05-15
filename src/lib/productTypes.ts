@@ -14,10 +14,10 @@ export type SizeConfig = {
 };
 
 export const SIZE_CONFIG: Record<SizeKey, SizeConfig> = {
-  "20": { label: '20" Cabine', details: "Court voyage" },
-  "24": { label: '24" Moyen', details: "1 semaine" },
-  "28": { label: '28" Grand', details: "Famille / long voyage" },
-  pack3: { label: "Pack 3 pièces", details: "S/M/L complet" },
+  "20": { label: '20" Cabine', details: "Voyage léger" },
+  "24": { label: '24" Moyen', details: "Le plus demandé" },
+  "28": { label: '28" Grand', details: "Max rangement" },
+  pack3: { label: "Pack 3 pièces", details: "Prix avantageux" },
 };
 
 export type VariantSize = {
@@ -25,12 +25,29 @@ export type VariantSize = {
   inStock: boolean;
 };
 
+export type MediaType = "image" | "video";
+
+export type VariantMediaItem = {
+  type: MediaType;
+  url: string;
+  posterUrl?: string; // used for video cover thumbnail
+};
+
+export type LandingContent = {
+  heroHook?: string; // short selling hook under title
+  heroBullets?: string[]; // short trust/selling bullets
+  pointsForts?: Array<{ title: string; text: string }>;
+  faq?: Array<{ q: string; a: string }>;
+  reviews?: Array<{ name: string; city: string; text: string; rtl?: boolean }>;
+};
+
 export type ProductVariant = {
   id: string;
   colorName: string;
   colorHex: string;
-  images: string[]; // first = main, others = thumbnails
-  sizes: Record<SizeKey, VariantSize>;
+  media: VariantMediaItem[]; // ordered; first = cover
+  images: string[]; // derived images (type=image), kept for legacy components
+  available?: boolean;
 };
 
 export type Product = {
@@ -42,7 +59,10 @@ export type Product = {
   detailedDescription?: string;
   category: ProductCategory;
   bestSeller: boolean;
+  available: boolean; // product availability (stock status)
   stockText: string; // e.g. "Stock limité"
+  landing?: LandingContent;
+  sizes: Record<SizeKey, VariantSize>;
   details?: {
     material?: string;
     dimensions?: string;

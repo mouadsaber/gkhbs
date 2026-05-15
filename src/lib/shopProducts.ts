@@ -1,24 +1,19 @@
 import type { Product } from "@/lib/productTypes";
-import { readStore } from "@/lib/productsStore";
+import { isDbConfigured } from "@/lib/db";
+import { getAllProductsDb, getProductBySlugDb } from "@/lib/productsDb";
+import { getHomepageCoverDb } from "@/lib/settingsDb";
 
 export async function getProducts(): Promise<Product[]> {
-  const store = await readStore();
-  return store.products;
+  if (!isDbConfigured()) throw new Error("db_not_configured");
+  return await getAllProductsDb();
 }
 
 export async function getProductBySlug(slug: string): Promise<Product | null> {
-  const store = await readStore();
-  return store.products.find((p) => p.slug === slug) ?? null;
+  if (!isDbConfigured()) throw new Error("db_not_configured");
+  return await getProductBySlugDb(slug);
 }
 
 export async function getHomepageCover() {
-  const store = await readStore();
-  const c = store.settings?.homepageCover;
-  return {
-    desktopUrl: c?.desktopUrl || "/cover/default-desktop.svg",
-    mobileUrl: c?.mobileUrl || "/cover/default-mobile.svg",
-    linkUrl: c?.linkUrl || "",
-    linkedProductSlug: c?.linkedProductSlug || "",
-    alt: c?.alt || "Couverture boutique valises",
-  };
+  if (!isDbConfigured()) throw new Error("db_not_configured");
+  return await getHomepageCoverDb();
 }

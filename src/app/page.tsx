@@ -2,6 +2,8 @@ import { Catalog } from "@/components/catalog/Catalog";
 import { Suspense } from "react";
 import { getHomepageCover, getProducts } from "@/lib/shopProducts";
 
+export const dynamic = "force-dynamic";
+
 export default function Home() {
   return (
     <>

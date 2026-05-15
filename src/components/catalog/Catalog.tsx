@@ -128,7 +128,7 @@ export function Catalog({
                 "no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none]",
                 "md:grid md:grid-cols-3 md:gap-5 md:overflow-visible md:pb-0",
               ].join(" ")}
-              style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x" }}
+              style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
             >
               {bestSellers.map((p) => (
                 <div key={p.id} className="snap-start w-[320px] shrink-0 md:w-auto">

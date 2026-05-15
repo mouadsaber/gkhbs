@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getAdminCookieName, isValidAdminSessionCookie, parseCookieHeader } from "@/lib/adminSession";
+import { ensureUploadsDir } from "@/lib/uploads";
 
 export async function POST(request: Request) {
   const auth = requireAdmin(request);
@@ -24,10 +25,16 @@ export async function POST(request: Request) {
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const ext = guessExt(file.type, file.name);
+  if (!ext) {
+    return NextResponse.json(
+      { ok: false, error: "unsupported_file_type" },
+      { status: 400 }
+    );
+  }
   const name = `upl_${crypto.randomBytes(8).toString("hex")}${ext}`;
-  const uploadsDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadsDir, { recursive: true });
+  const uploadsDir = await ensureUploadsDir();
   await writeFile(path.join(uploadsDir, name), bytes);
+  console.log("[admin/upload] saved", { name, uploadsDir });
 
   return NextResponse.json({ ok: true, url: `/uploads/${name}` });
 }
@@ -38,10 +45,16 @@ function guessExt(mime: string, filename: string) {
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return ".jpg";
   if (lower.endsWith(".webp")) return ".webp";
   if (lower.endsWith(".svg")) return ".svg";
+  if (lower.endsWith(".mp4")) return ".mp4";
+  if (lower.endsWith(".webm")) return ".webm";
+  if (lower.endsWith(".mov")) return ".mov";
   if (mime === "image/png") return ".png";
   if (mime === "image/jpeg") return ".jpg";
   if (mime === "image/webp") return ".webp";
   if (mime === "image/svg+xml") return ".svg";
+  if (mime === "video/mp4") return ".mp4";
+  if (mime === "video/webm") return ".webm";
+  if (mime === "video/quicktime") return ".mov";
   return "";
 }
 

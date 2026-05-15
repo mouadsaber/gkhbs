@@ -1,36 +1,50 @@
 import { NextResponse } from "next/server";
 import { getAdminCookieName, isValidAdminSessionCookie, parseCookieHeader } from "@/lib/adminSession";
-import { readStore, writeStore } from "@/lib/productsStore";
-import type { ProductStore } from "@/lib/productTypes";
+import { isDbConfigured } from "@/lib/db";
+import { getHomepageCoverDb, upsertHomepageCoverDb } from "@/lib/settingsDb";
 
 export async function GET(request: Request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-  const store = await readStore();
-  return NextResponse.json({ ok: true, settings: store.settings || {} });
+  try {
+    const auth = requireAdmin(request);
+    if (auth) return auth;
+    if (!isDbConfigured()) {
+      return NextResponse.json({ ok: false, error: "db_not_configured" }, { status: 500 });
+    }
+    const cover = await getHomepageCoverDb();
+    return NextResponse.json({
+      ok: true,
+      settings: { homepageCover: cover },
+    });
+  } catch (err) {
+    console.error("[admin/settings] GET failed:", err);
+    return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
+  }
 }
 
 export async function PUT(request: Request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  let body: Partial<ProductStore["settings"]> | null = null;
   try {
-    body = (await request.json()) as Partial<ProductStore["settings"]>;
-  } catch {
-    return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
-  }
+    const auth = requireAdmin(request);
+    if (auth) return auth;
 
-  const store = await readStore();
-  const next: ProductStore = {
-    ...store,
-    settings: {
-      ...(store.settings || {}),
-      ...(body || {}),
-    },
-  };
-  await writeStore(next);
-  return NextResponse.json({ ok: true, settings: next.settings || {} });
+    let body: { homepageCover?: Parameters<typeof upsertHomepageCoverDb>[0] } | null = null;
+    try {
+      body = (await request.json()) as { homepageCover?: Parameters<typeof upsertHomepageCoverDb>[0] };
+    } catch {
+      return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
+    }
+
+    if (!isDbConfigured()) {
+      return NextResponse.json({ ok: false, error: "db_not_configured" }, { status: 500 });
+    }
+    if (body?.homepageCover) {
+      await upsertHomepageCoverDb(body.homepageCover);
+    }
+    const cover = await getHomepageCoverDb();
+    return NextResponse.json({ ok: true, settings: { homepageCover: cover } });
+  } catch (err) {
+    console.error("[admin/settings] PUT failed:", err);
+    return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
+  }
 }
 
 function requireAdmin(request: Request) {
@@ -44,4 +58,3 @@ function requireAdmin(request: Request) {
     { status: valid.reason === "admin_password_not_configured" ? 500 : 401 }
   );
 }
-

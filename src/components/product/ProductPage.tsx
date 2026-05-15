@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product, ProductVariant, SizeKey } from "@/lib/productTypes";
 import { SIZE_CONFIG } from "@/lib/productTypes";
 import { ProductCard } from "@/components/catalog/ProductCard";
+import { ProductGallery } from "@/components/product/ProductGallery";
+import { trackAddToCart, trackPurchase, trackViewContent } from "@/lib/metaPixel";
 
 export function ProductPage({
   product,
@@ -16,11 +18,29 @@ export function ProductPage({
   similarProducts: Product[];
   autoOpenOrder?: boolean;
 }) {
+  const landing = product.landing || {};
+  const heroHook =
+    typeof landing.heroHook === "string" && landing.heroHook.trim().length
+      ? landing.heroHook.trim()
+      : "";
+  const heroBullets =
+    Array.isArray(landing.heroBullets) && landing.heroBullets.length
+      ? landing.heroBullets.slice(0, 6)
+      : null;
+  const pointsForts =
+    Array.isArray(landing.pointsForts) && landing.pointsForts.length
+      ? landing.pointsForts.slice(0, 6)
+      : null;
+  const faqs =
+    Array.isArray(landing.faq) && landing.faq.length ? landing.faq.slice(0, 8) : null;
+  const reviews =
+    Array.isArray(landing.reviews) && landing.reviews.length
+      ? landing.reviews.slice(0, 6)
+      : null;
+
   const initialVariant = product.variants[0] as ProductVariant | undefined;
   function selectVariant(v: ProductVariant) {
     setVariant(v);
-    setSelectedImage(v.images[0] || "/products/valise-cabine.svg");
-    setSizeKey(firstAvailableSizeKey(v));
   }
 
   const [variant, setVariant] = useState<ProductVariant>(
@@ -28,23 +48,14 @@ export function ProductPage({
       id: "missing",
       colorName: "—",
       colorHex: "#0A0A0A",
+      media: [{ type: "image", url: "/products/valise-cabine.svg" }],
       images: ["/products/valise-cabine.svg"],
-      sizes: {
-        "20": { price: 0, inStock: false },
-        "24": { price: 0, inStock: false },
-        "28": { price: 0, inStock: false },
-        pack3: { price: 0, inStock: false },
-      },
+      available: true,
     }
   );
-  const [selectedImage, setSelectedImage] = useState(
-    variant.images[0] || "/products/valise-cabine.svg"
+  const [selectedSizeKeys, setSelectedSizeKeys] = useState<Set<SizeKey>>(
+    () => new Set<SizeKey>([firstAvailableSizeKey(variant)])
   );
-  const [zoomOpen, setZoomOpen] = useState(false);
-  const [zoomScale, setZoomScale] = useState(1);
-  const [hoverZoomActive, setHoverZoomActive] = useState(false);
-  const [hoverOrigin, setHoverOrigin] = useState({ x: 50, y: 50 });
-  const [sizeKey, setSizeKey] = useState<SizeKey>(() => firstAvailableSizeKey(variant));
   const [quantity, setQuantity] = useState(1);
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -52,63 +63,186 @@ export function ProductPage({
   const [formError, setFormError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const phoneInputRef = useRef<HTMLInputElement | null>(null);
+  const cityInputRef = useRef<HTMLInputElement | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsIndex, setDetailsIndex] = useState(0);
+  const [pricePulse, setPricePulse] = useState(false);
 
-  const demandeRef = useRef<HTMLDivElement | null>(null);
-  const hoverZoomEnabled = useRef(false);
+  const demandeMobileRef = useRef<HTMLDivElement | null>(null);
+  const demandeDesktopRef = useRef<HTMLDivElement | null>(null);
+  const colorMobileRef = useRef<HTMLDivElement | null>(null);
+  const colorDesktopRef = useRef<HTMLDivElement | null>(null);
+  const sizeMobileRef = useRef<HTMLDivElement | null>(null);
+  const sizeDesktopRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedSize = variant.sizes[sizeKey];
-  const canOrder = Boolean(selectedSize) && selectedSize.inStock;
+  const selectedKeys = useMemo(() => Array.from(selectedSizeKeys), [selectedSizeKeys]);
+  const productAvailable = (product as any).available !== false;
+  const canOrder =
+    productAvailable &&
+    selectedKeys.length > 0 &&
+    selectedKeys.every((k) => Boolean(product.sizes[k]) && product.sizes[k].inStock);
+  const selectedPrice = selectedKeys.reduce((sum, k) => {
+    const p = product.sizes[k]?.price;
+    return sum + (typeof p === "number" && Number.isFinite(p) ? p : 0);
+  }, 0);
+  const safeQuantity = Number.isFinite(quantity) ? Math.max(1, quantity) : 1;
+  const totalPrice = Math.max(0, selectedPrice) * safeQuantity;
+  const selectedSizeLabel =
+    selectedKeys.length === 0
+      ? "Sélectionnez une taille"
+      : selectedKeys.length === 1
+        ? SIZE_CONFIG[selectedKeys[0] as SizeKey].label
+        : `${selectedKeys.length} tailles sélectionnées`;
+  const selectedOldPrice =
+    selectedKeys.length === 1 &&
+    product.sizes[selectedKeys[0] as SizeKey] &&
+    typeof (product.sizes[selectedKeys[0] as SizeKey] as unknown as { oldPrice?: number }).oldPrice === "number"
+      ? (product.sizes[selectedKeys[0] as SizeKey] as unknown as { oldPrice?: number }).oldPrice!
+      : null;
 
-  const commanderLabel =
-    !canOrder && sizeKey === "pack3"
+  const commanderLabel = !productAvailable
+    ? "Produit indisponible"
+    : !canOrder && selectedSizeKeys.has("pack3")
       ? "Bientôt disponible"
-      : "Envoyer la demande";
+      : "Commander maintenant";
+
+  function scrollToOrder() {
+    requestAnimationFrame(() => {
+      const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+      const target = isDesktop ? demandeDesktopRef.current : demandeMobileRef.current;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.setTimeout(() => nameInputRef.current?.focus(), 250);
+    });
+  }
+
+  function scrollToMissing(kind: "color" | "size" | "name" | "phone" | "city") {
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    const colorRef = isDesktop ? colorDesktopRef.current : colorMobileRef.current;
+    const sizeRef = isDesktop ? sizeDesktopRef.current : sizeMobileRef.current;
+    if (kind === "color") {
+      colorRef?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (kind === "size") {
+      sizeRef?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const input =
+      kind === "name"
+        ? nameInputRef.current
+        : kind === "phone"
+          ? phoneInputRef.current
+          : cityInputRef.current;
+    input?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => input?.focus(), 250);
+  }
+
+  const detailImages = (variant.media || [])
+    .filter((m) => m.type === "image")
+    .map((m) => m.url)
+    .slice(1, 5);
 
   useEffect(() => {
     if (!autoOpenOrder) return;
     window.setTimeout(() => {
-      demandeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+      const target = isDesktop ? demandeDesktopRef.current : demandeMobileRef.current;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 0);
   }, [autoOpenOrder]);
 
   useEffect(() => {
-    // Enable hover zoom only on devices that support hover with a fine pointer.
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const apply = () => {
-      hoverZoomEnabled.current = Boolean(mq.matches);
-      if (!mq.matches) {
-        setHoverZoomActive(false);
-        setHoverOrigin({ x: 50, y: 50 });
+    trackViewContent({
+      contentName: product.name,
+      contentIds: [product.slug || product.reference].filter(Boolean),
+      value: Math.max(0, totalPrice),
+      currency: "MAD",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product.slug, product.reference]);
+
+  useEffect(() => {
+    setPricePulse(true);
+    const t = window.setTimeout(() => setPricePulse(false), 220);
+    return () => window.clearTimeout(t);
+  }, [selectedSizeLabel, selectedPrice, safeQuantity]);
+
+  function toggleSize(key: SizeKey) {
+    const s = product.sizes[key];
+    if (!s?.inStock) return;
+    setSelectedSizeKeys((prev) => {
+      const next = new Set(prev);
+      if (key === "pack3") {
+        if (next.has("pack3")) next.delete("pack3");
+        else {
+          next.clear();
+          next.add("pack3");
+        }
+        return next;
       }
-    };
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
+      next.delete("pack3");
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   async function sendOrder(e?: React.FormEvent) {
     if (e) e.preventDefault();
     setFormError(null);
     setSent(false);
-    requestAnimationFrame(() => {
-      demandeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
 
-    const qty = Number.isFinite(quantity) ? Math.max(1, quantity) : 1;
+    const qty = safeQuantity;
     const normalizedName = fullName.trim();
     const normalizedPhone = phone.trim();
     const normalizedCity = city.trim();
 
-    if (!normalizedName || !normalizedPhone || !normalizedCity) {
+    // If something is missing, scroll/focus only to the missing section.
+    if (!variant?.id || variant.id === "missing") {
+      setFormError("Veuillez sélectionner une couleur.");
+      scrollToMissing("color");
+      return;
+    }
+    if (!selectedKeys.length) {
+      setFormError("Veuillez sélectionner une taille.");
+      scrollToMissing("size");
+      return;
+    }
+    if (!normalizedName) {
       setFormError("Merci de remplir Nom complet, Téléphone et Ville.");
+      scrollToMissing("name");
+      return;
+    }
+    if (!normalizedPhone) {
+      setFormError("Merci de remplir Nom complet, Téléphone et Ville.");
+      scrollToMissing("phone");
+      return;
+    }
+    if (!normalizedCity) {
+      setFormError("Merci de remplir Nom complet, Téléphone et Ville.");
+      scrollToMissing("city");
       return;
     }
 
     if (!canOrder) {
       setFormError("Veuillez sélectionner une taille disponible.");
+      scrollToMissing("size");
       return;
     }
+
+    if (!Number.isFinite(selectedPrice) || selectedPrice <= 0) {
+      setFormError("Prix introuvable. Veuillez réessayer ou nous contacter.");
+      return;
+    }
+
+    trackAddToCart({
+      contentName: product.name,
+      contentIds: [product.slug || product.reference].filter(Boolean),
+      value: Math.max(0, totalPrice),
+      currency: "MAD",
+    });
 
     setSending(true);
     try {
@@ -121,9 +255,13 @@ export function ProductPage({
           city: normalizedCity,
           productName: product.name,
           reference: product.reference,
-          productImage: variant.images[0] || "",
+          productImage:
+            (variant.media || []).find((m) => m.type === "image")?.url ||
+            variant.images?.[0] ||
+            "",
           color: variant.colorName,
-          size: SIZE_CONFIG[sizeKey].label,
+          size: selectedKeys.map((k) => SIZE_CONFIG[k].label).join(" + "),
+          unitPrice: selectedPrice,
           quantity: qty,
         }),
       });
@@ -135,6 +273,12 @@ export function ProductPage({
         );
         return;
       }
+      trackPurchase({
+        contentName: product.name,
+        contentIds: [product.slug || product.reference].filter(Boolean),
+        value: Math.max(0, totalPrice),
+        currency: "MAD",
+      });
       setSent(true);
     } catch (err) {
       console.error("[order] submit failed", err);
@@ -144,9 +288,37 @@ export function ProductPage({
     }
   }
 
+  function onCommanderNowClick() {
+    const normalizedName = fullName.trim();
+    const normalizedPhone = phone.trim();
+    const normalizedCity = city.trim();
+    if (!variant?.id || variant.id === "missing") {
+      scrollToMissing("color");
+      return;
+    }
+    if (!selectedKeys.length) {
+      scrollToMissing("size");
+      return;
+    }
+    if (!normalizedName) {
+      scrollToMissing("name");
+      return;
+    }
+    if (!normalizedPhone) {
+      scrollToMissing("phone");
+      return;
+    }
+    if (!normalizedCity) {
+      scrollToMissing("city");
+      return;
+    }
+    // Everything valid -> submit immediately without scrolling away.
+    void sendOrder();
+  }
+
   return (
-    <div className="bg-white">
-      <div className="mx-auto w-full max-w-[1400px] px-4 pt-8 pb-20 sm:px-6">
+    <div className="bg-zinc-50">
+      <div className="mx-auto w-full max-w-[1400px] px-4 pt-6 pb-28 sm:px-6 sm:pt-10 sm:pb-20">
         <nav className="mb-6 text-sm text-zinc-600">
           <Link href="/" className="hover:text-zinc-900">
             Catalogue
@@ -155,89 +327,269 @@ export function ProductPage({
           <span className="text-zinc-900">{product.name}</span>
         </nav>
 
-        <div className="grid gap-10 lg:grid-cols-[3fr_2fr] lg:items-start">
-          {/* Left: gallery only */}
+        <div className="grid gap-8 lg:grid-cols-[3fr_2fr] lg:items-start">
+          {/* 1) Hero product section — Left: gallery */}
           <section className="min-w-0">
-            <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-white">
-              <button
-                type="button"
-                onClick={() => {
-                  setZoomOpen(true);
-                  setZoomScale(1);
-                }}
-                onMouseEnter={() => {
-                  if (!hoverZoomEnabled.current) return;
-                  setHoverZoomActive(true);
-                }}
-                onMouseLeave={() => {
-                  setHoverZoomActive(false);
-                  setHoverOrigin({ x: 50, y: 50 });
-                }}
-                onMouseMove={(e) => {
-                  if (!hoverZoomEnabled.current) return;
-                  if (!hoverZoomActive) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = ((e.clientX - rect.left) / rect.width) * 100;
-                  const y = ((e.clientY - rect.top) / rect.height) * 100;
-                  setHoverOrigin({
-                    x: Math.max(0, Math.min(100, x)),
-                    y: Math.max(0, Math.min(100, y)),
-                  });
-                }}
-                className={[
-                  "relative block w-full cursor-zoom-in bg-white",
-                  "h-[360px] sm:h-[460px] lg:h-[650px]",
-                ].join(" ")}
-                aria-label="Zoom image"
-              >
-                <Image
-                  src={selectedImage}
-                  alt={product.name}
-                  fill
-                  className={[
-                    "object-contain p-4 sm:p-6",
-                    "will-change-transform",
-                    "transition-transform duration-300 ease-out",
-                  ].join(" ")}
-                  style={{
-                    transformOrigin: hoverZoomActive
-                      ? `${hoverOrigin.x}% ${hoverOrigin.y}%`
-                      : "center center",
-                    transform: hoverZoomActive ? "scale(1.8)" : "scale(1)",
-                  }}
-                  sizes="(max-width: 1024px) 100vw, 50vw"
-                  priority
-                />
-              </button>
-            </div>
+            <ProductGallery
+              media={variant.media}
+              alt={product.name}
+              className="rounded-[28px] bg-white p-3 ring-1 ring-zinc-200 shadow-sm"
+            />
+            {!productAvailable ? (
+              <div className="mt-3 inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 lg:hidden">
+                Rupture de stock
+              </div>
+            ) : null}
 
-            <div className="mt-4 flex flex-wrap gap-3">
-              {variant.images.map((img) => {
-                const active = img === selectedImage;
-                return (
-                  <button
-                    key={img}
-                    type="button"
-                    onClick={() => setSelectedImage(img)}
-                    className={[
-                      "relative h-16 w-16 overflow-hidden rounded-2xl bg-white ring-1 sm:h-18 sm:w-18",
-                      active
-                        ? "ring-zinc-900"
-                        : "ring-zinc-200 hover:ring-zinc-300 hover:shadow-sm",
-                    ].join(" ")}
-                    aria-pressed={active}
-                    aria-label="Miniature"
-                  >
-                    <Image
-                      src={img}
-                      alt=""
-                      fill
-                      className="object-contain p-2"
-                      sizes="80px"
+            {/* Mobile ordering flow (keep desktop layout unchanged) */}
+            <div
+              ref={demandeMobileRef}
+              className="mt-4 rounded-[28px] border border-zinc-200 bg-white p-6 shadow-sm lg:hidden"
+            >
+              <div className="text-base font-semibold text-zinc-900">
+                Demande de commande
+              </div>
+              <div className="mt-1 text-sm text-zinc-600">
+                Sélectionnez votre modèle, taille et couleur, puis envoyez votre demande.
+              </div>
+
+              <div className="mt-3 text-sm font-medium text-zinc-700">
+                🚚 Livraison estimée : 24–48h
+              </div>
+
+            <div className="mt-4">
+                <Label>Couleur</Label>
+                <div ref={colorMobileRef} className="mt-2 flex flex-wrap gap-2">
+                  {product.variants.map((v) => {
+                    const active = v.id === variant.id;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => selectVariant(v)}
+                        className={[
+                          "relative h-10 w-10 rounded-full ring-1 ring-inset transition",
+                          active
+                            ? "ring-zinc-900"
+                            : "ring-zinc-200 hover:ring-zinc-300",
+                        ].join(" ")}
+                        aria-pressed={active}
+                        aria-label={v.colorName}
+                        title={v.colorName}
+                      >
+                        <span
+                          className="absolute inset-1 rounded-full"
+                          style={{ backgroundColor: v.colorHex }}
+                          aria-hidden
+                        />
+                        {active ? (
+                          <span
+                            className="absolute inset-0 grid place-items-center text-white"
+                            aria-hidden
+                          >
+                            ✓
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <form onSubmit={sendOrder} className="mt-4 space-y-4">
+                <div>
+                  <Label>Taille</Label>
+                  <div ref={sizeMobileRef} className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {(
+                      Object.keys(SIZE_CONFIG) as Array<keyof typeof SIZE_CONFIG>
+                    ).map((k) => {
+                      const key = k as SizeKey;
+                      const cfg = SIZE_CONFIG[key];
+                      const s = product.sizes[key];
+                      const disabled = !s?.inStock;
+                      const active = selectedSizeKeys.has(key);
+                      const price = typeof s?.price === "number" ? s.price : 0;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => {
+                            if (disabled) return;
+                            toggleSize(key);
+                          }}
+                          className={[
+                            "rounded-2xl p-3 text-left ring-1 ring-inset transition",
+                            active
+                              ? "bg-zinc-900 text-white ring-zinc-900 shadow-sm shadow-zinc-900/15"
+                              : disabled
+                                ? "bg-zinc-50 text-zinc-400 ring-zinc-200"
+                                : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 hover:shadow-sm hover:-translate-y-[1px]",
+                          ].join(" ")}
+                          aria-pressed={active}
+                          aria-disabled={disabled}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold">{cfg.label}</div>
+                              <div
+                                className={[
+                                  "mt-1 text-xs",
+                                  active ? "text-white/80" : "text-zinc-500",
+                                ].join(" ")}
+                              >
+                                {cfg.details}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              {disabled && key === "pack3" ? (
+                                <div
+                                  className={[
+                                    "text-xs font-semibold",
+                                    active ? "text-white/80" : "text-zinc-500",
+                                  ].join(" ")}
+                                >
+                                  Bientôt disponible
+                                </div>
+                              ) : (
+                                <div
+                                  className={[
+                                    "text-sm font-semibold",
+                                    active
+                                      ? "text-white"
+                                      : disabled
+                                        ? "text-zinc-400"
+                                        : "text-zinc-900",
+                                  ].join(" ")}
+                                >
+                                  {formatDh(price)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/70 to-white px-4 py-3 shadow-sm ring-1 ring-emerald-200/30">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="inline-flex rounded-full bg-emerald-600/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                        Prix sélectionné
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-zinc-900">
+                        {selectedSizeLabel}
+                      </div>
+                    </div>
+                    <div
+                      className={[
+                        "text-right font-extrabold leading-none tracking-tight text-[#009B5A]",
+                        "text-[28px]",
+                        "transition-transform duration-200",
+                        pricePulse ? "scale-[1.03]" : "scale-100",
+                      ].join(" ")}
+                    >
+                      {formatDh(totalPrice)}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Quantité</Label>
+                  <div className="mt-2 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                      className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
+                      aria-label="Diminuer"
+                    >
+                      −
+                    </button>
+                    <input
+                      inputMode="numeric"
+                      value={quantity}
+                      onChange={(e) =>
+                        setQuantity(Math.max(1, Number(e.target.value || 1)))
+                      }
+                      className="h-11 w-16 rounded-2xl border border-zinc-200 bg-white text-center text-sm font-semibold text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/20"
+                      aria-label="Quantité"
                     />
-                  </button>
-                );
-              })}
+                    <button
+                      type="button"
+                      onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                      className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
+                      aria-label="Augmenter"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <div className="text-sm font-semibold text-zinc-900">Nom complet</div>
+                    <input
+                      ref={nameInputRef}
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
+                      placeholder="Votre nom"
+                      autoComplete="name"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="text-sm font-semibold text-zinc-900">Téléphone</div>
+                    <input
+                      ref={phoneInputRef}
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
+                      placeholder="06..."
+                      autoComplete="tel"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <div className="text-sm font-semibold text-zinc-900">Ville</div>
+                    <input
+                      ref={cityInputRef}
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
+                      placeholder="Casablanca, Rabat..."
+                      autoComplete="address-level2"
+                    />
+                  </label>
+                </div>
+
+                {formError ? (
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-800">
+                    {formError}
+                  </div>
+                ) : null}
+
+                {sent ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                    Merci, votre demande a été envoyée. Nous allons vous contacter rapidement.
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={!canOrder || sending}
+                  className={[
+                    "inline-flex w-full items-center justify-center",
+                    "rounded-3xl px-5 py-4 text-sm font-extrabold text-white",
+                    "bg-gradient-to-b from-emerald-600 to-emerald-700",
+                    "shadow-sm shadow-emerald-600/20 transition",
+                    "hover:from-emerald-600 hover:to-emerald-800 hover:shadow-md hover:scale-[1.01]",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40",
+                    "disabled:opacity-50",
+                  ].join(" ")}
+                >
+                  {sending ? "Envoi en cours…" : commanderLabel}
+                </button>
+              </form>
             </div>
 
             <div className="mt-6">
@@ -254,10 +606,81 @@ export function ProductPage({
               </div>
             </div>
 
-            <ProductDetails product={product} />
+            <div className="mt-10 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="text-lg font-semibold tracking-tight text-zinc-900">
+                Points forts
+              </div>
+              <div className="mt-1 text-sm text-zinc-600">
+                Des détails pensés pour voyager sereinement, au quotidien comme en long séjour.
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {(pointsForts || [
+                  {
+                    title: "Protection premium",
+                    text: "Coque rigide anti-choc, finitions propres et durables.",
+                  },
+                  {
+                    title: "Confort de roulage",
+                    text: "Roues 360° silencieuses, maniabilité fluide.",
+                  },
+                  {
+                    title: "Sécurité",
+                    text: "Serrure TSA pour plus de tranquillité en déplacement.",
+                  },
+                  {
+                    title: "Service rapide",
+                    text: "Confirmation par téléphone + livraison 24–48h.",
+                  },
+                ]).map((x) => (
+                  <BulletCard key={x.title} title={x.title} text={x.text} />
+                ))}
+              </div>
+            </div>
+
+            {detailImages.length ? (
+              <div className="mt-10">
+                <SectionTitle
+                  title="Galerie détails"
+                  subtitle="Zoom sur les finitions et les angles du modèle."
+                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {detailImages.map((src, idx) => (
+                    <button
+                      key={`${src}_${idx}`}
+                      type="button"
+                      onClick={() => {
+                        setDetailsIndex(idx);
+                        setDetailsOpen(true);
+                      }}
+                      className="group relative overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50"
+                      aria-label="Voir l’image"
+                    >
+                      <div className="relative h-[210px] w-full">
+                        <Image
+                          src={src}
+                          alt=""
+                          fill
+                          className="object-contain p-5 transition-transform duration-300 group-hover:scale-[1.02]"
+                          sizes="(max-width: 640px) 100vw, 50vw"
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-10">
+              <SectionTitle
+                title="Dimensions et poids"
+                subtitle="Informations utiles avant achat."
+              />
+              <ProductDetails product={product} />
+            </div>
           </section>
 
-          <section className="min-w-0 lg:sticky lg:top-8">
+          {/* 1) Hero product section — Right: info + order card (sticky) */}
+          <section className="min-w-0 lg:sticky lg:top-6">
             <div className="mb-3 flex items-center gap-3">
               <div className="relative h-9 w-24 opacity-90">
                 <Image
@@ -271,16 +694,54 @@ export function ProductPage({
               </div>
             </div>
             <p className="text-sm font-semibold text-zinc-600">{product.reference}</p>
-            <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl">
+            {!productAvailable ? (
+              <div className="mt-2 inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                Rupture de stock
+              </div>
+            ) : null}
+            <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl lg:text-[42px]">
               {product.name}
             </h1>
+            <div className="mt-3">
+              <PriceLine
+                price={selectedPrice}
+                oldPrice={selectedOldPrice}
+                label={selectedSizeLabel}
+              />
+            </div>
+            {heroHook ? (
+              <div className="mt-3 text-sm font-semibold text-zinc-800">
+                {heroHook}
+              </div>
+            ) : null}
             <p className="mt-3 text-pretty text-sm leading-6 text-zinc-600 sm:text-base">
               {product.description}
             </p>
 
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(heroBullets || [
+                "Livraison gratuite",
+                "Paiement à la livraison",
+                "Livraison partout au Maroc",
+                "Support WhatsApp",
+              ]).map((t) => (
+                <Badge key={t}>{t}</Badge>
+              ))}
+            </div>
+
+            <div className="mt-4">
+              <StockBadge available={(product as any).available !== false} />
+            </div>
+
+            <div className="mt-3 grid gap-1.5 text-sm font-medium text-zinc-700">
+              <div>🔥 Forte demande aujourd’hui</div>
+              <div>🚚 Livraison 24–48h</div>
+              <div>✅ Paiement à la livraison</div>
+            </div>
+
             <div
-              ref={demandeRef}
-              className="mt-7 rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm"
+              ref={demandeDesktopRef}
+              className="mt-6 hidden rounded-[28px] border border-zinc-200 bg-white p-6 shadow-sm sm:p-7 lg:block"
             >
               <div className="text-base font-semibold text-zinc-900">
                 Demande de commande
@@ -293,9 +754,38 @@ export function ProductPage({
                 🚚 Livraison estimée : 24–48h
               </div>
 
+              <div className="mt-4 hidden rounded-3xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/70 to-white px-4 py-3 shadow-sm ring-1 ring-emerald-200/30 lg:block">
+                <div className="flex items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="inline-flex rounded-full bg-emerald-600/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                      Prix sélectionné
+                    </div>
+                    <div className="mt-2 text-sm font-semibold text-zinc-900">
+                      {selectedSizeLabel}
+                    </div>
+                  </div>
+                  <div
+                    className={[
+                      "text-right font-extrabold leading-none tracking-tight text-[#009B5A]",
+                      "text-[28px] sm:text-[32px]",
+                      "transition-transform duration-200",
+                      pricePulse ? "scale-[1.03]" : "scale-100",
+                    ].join(" ")}
+                  >
+                    {formatDh(totalPrice)}
+                  </div>
+                </div>
+                {safeQuantity > 1 ? (
+                  <div className="mt-2 text-xs font-semibold text-zinc-600">
+                    {formatDh(selectedPrice)} × {safeQuantity} ={" "}
+                    <span className="font-extrabold text-zinc-900">{formatDh(totalPrice)}</span>
+                  </div>
+                ) : null}
+              </div>
+
               <div className="mt-5">
                 <Label>Couleur</Label>
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div ref={colorDesktopRef} className="mt-2 flex flex-wrap gap-2">
                   {product.variants.map((v) => {
                     const active = v.id === variant.id;
                     return (
@@ -335,61 +825,109 @@ export function ProductPage({
               <form onSubmit={sendOrder} className="mt-5 space-y-5">
                 <div>
                   <Label>Taille</Label>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div ref={sizeDesktopRef} className="mt-2 grid gap-2 sm:grid-cols-2">
                     {(
                       Object.keys(SIZE_CONFIG) as Array<keyof typeof SIZE_CONFIG>
                     ).map((k) => {
                       const key = k as SizeKey;
                       const cfg = SIZE_CONFIG[key];
-                      const s = variant.sizes[key];
+                      const s = product.sizes[key];
                       const disabled = !s?.inStock;
-                      const active = key === sizeKey;
-                      return (
+                      const active = selectedSizeKeys.has(key);
+                      const price = typeof s?.price === "number" ? s.price : 0;
+                  return (
                         <button
                           key={key}
                           type="button"
                           onClick={() => {
                             if (disabled) return;
-                            setSizeKey(key);
+                            toggleSize(key);
                           }}
                           className={[
                             "rounded-2xl p-3 text-left ring-1 ring-inset transition",
                             active
-                              ? "bg-zinc-900 text-white ring-zinc-900"
+                              ? "bg-zinc-900 text-white ring-zinc-900 shadow-sm shadow-zinc-900/15"
                               : disabled
                                 ? "bg-zinc-50 text-zinc-400 ring-zinc-200"
-                                : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50",
+                                : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50 hover:shadow-sm hover:-translate-y-[1px]",
                           ].join(" ")}
                           aria-pressed={active}
                           aria-disabled={disabled}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-sm font-semibold">{cfg.label}</div>
                               <div
                                 className={[
-                                  "mt-0.5 text-xs",
+                                  "mt-1 text-xs",
                                   active ? "text-white/80" : "text-zinc-500",
                                 ].join(" ")}
                               >
                                 {cfg.details}
                               </div>
                             </div>
-                            {disabled && key === "pack3" ? (
-                              <div
-                                className={[
-                                  "text-xs font-semibold",
-                                  active ? "text-white/80" : "text-zinc-500",
-                                ].join(" ")}
-                              >
-                                Bientôt disponible
-                              </div>
-                            ) : null}
+                            <div className="shrink-0 text-right">
+                              {disabled && key === "pack3" ? (
+                                <div
+                                  className={[
+                                    "text-xs font-semibold",
+                                    active ? "text-white/80" : "text-zinc-500",
+                                  ].join(" ")}
+                                >
+                                  Bientôt disponible
+                                </div>
+                              ) : (
+                                <div
+                                  className={[
+                                    "text-sm font-semibold",
+                                    active
+                                      ? "text-white"
+                                      : disabled
+                                        ? "text-zinc-400"
+                                        : "text-zinc-900",
+                                  ].join(" ")}
+                                >
+                                  {formatDh(price)}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </button>
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Desktop-only selected price box below sizes */}
+                <div className="rounded-3xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/70 to-white px-4 py-3 shadow-sm ring-1 ring-emerald-200/30">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="inline-flex rounded-full bg-emerald-600/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                        Prix sélectionné
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-zinc-900">
+                        {selectedSizeLabel}
+                      </div>
+                    </div>
+                    <div
+                      className={[
+                        "text-right font-extrabold leading-none tracking-tight text-[#009B5A]",
+                        "text-[28px] sm:text-[32px]",
+                        "transition-transform duration-200",
+                        pricePulse ? "scale-[1.03]" : "scale-100",
+                      ].join(" ")}
+                    >
+                      {formatDh(totalPrice)}
+                    </div>
+                  </div>
+                  {safeQuantity > 1 ? (
+                    <div className="mt-2 text-xs font-semibold text-zinc-600">
+                      {formatDh(selectedPrice)} × {safeQuantity} ={" "}
+                      <span className="font-extrabold text-zinc-900">
+                        {formatDh(totalPrice)}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -427,6 +965,7 @@ export function ProductPage({
                   <label className="block">
                     <div className="text-sm font-semibold text-zinc-900">Nom complet</div>
                     <input
+                      ref={nameInputRef}
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
@@ -437,6 +976,7 @@ export function ProductPage({
                   <label className="block">
                     <div className="text-sm font-semibold text-zinc-900">Téléphone</div>
                     <input
+                      ref={phoneInputRef}
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
@@ -447,6 +987,7 @@ export function ProductPage({
                   <label className="block sm:col-span-2">
                     <div className="text-sm font-semibold text-zinc-900">Ville</div>
                     <input
+                      ref={cityInputRef}
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
@@ -468,14 +1009,37 @@ export function ProductPage({
                   </div>
                 ) : null}
 
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-800">
+                  Total : <span className="font-extrabold text-zinc-900">{formatDh(totalPrice)}</span>
+                  {safeQuantity > 1 ? (
+                    <span className="ml-2 text-xs font-semibold text-zinc-600">
+                      ({formatDh(selectedPrice)} × {safeQuantity})
+                    </span>
+                  ) : null}
+                </div>
+
                 <button
                   type="submit"
                   disabled={!canOrder || sending}
-                  className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 hover:shadow-md hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 disabled:opacity-50"
+                  className={[
+                    "inline-flex w-full items-center justify-center",
+                    "rounded-3xl px-5 py-4 text-sm font-extrabold text-white",
+                    "bg-gradient-to-b from-emerald-600 to-emerald-700",
+                    "shadow-sm shadow-emerald-600/20 transition",
+                    "hover:from-emerald-600 hover:to-emerald-800 hover:shadow-md hover:scale-[1.01]",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40",
+                    "disabled:opacity-50",
+                  ].join(" ")}
                 >
                   {sending ? "Envoi en cours…" : commanderLabel}
                 </button>
               </form>
+
+              <div className="mt-4 grid gap-1.5 text-sm text-zinc-700">
+                <div>Confirmation par téléphone</div>
+                <div>Livraison partout au Maroc</div>
+                <div>Support WhatsApp rapide</div>
+              </div>
 
               <div className="mt-4 grid gap-1.5 text-sm text-zinc-700">
                 <TrustRow label="Livraison 24–48h" />
@@ -487,7 +1051,7 @@ export function ProductPage({
         </div>
 
         {/* Below: full-width sections */}
-        <div className="mt-10 space-y-12">
+        <div className="mt-12 space-y-12">
           {product.variants.length > 1 ? (
             <section>
               <SectionTitle
@@ -528,14 +1092,14 @@ export function ProductPage({
                             style={{ backgroundColor: v.colorHex }}
                             aria-hidden
                           />
-                        <div className="text-sm font-semibold text-zinc-900">
-                          {v.colorName}
+                          <div className="text-sm font-semibold text-zinc-900">
+                            {v.colorName}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs font-medium text-zinc-600">
+                          Appuyez pour sélectionner
                         </div>
                       </div>
-                      <div className="mt-2 text-xs font-medium text-zinc-600">
-                        Appuyez pour sélectionner
-                      </div>
-                    </div>
                   </button>
                 );
               })}
@@ -558,23 +1122,46 @@ export function ProductPage({
             <div>
               <SectionTitle title="Avis clients" subtitle="Quelques retours récents." />
               <div className="grid gap-4 lg:grid-cols-1">
-                <ReviewCard
-                  name="Samira"
-                  city="Rabat"
-                  text="Très belle qualité, roues silencieuses. Livraison rapide."
-                />
-                <ReviewCard
-                  name="Fatima"
-                  city="Rabat"
-                  text="وصلاتني الفاليز بجودة فوق التوقعات، الرويدات خفاف والتوصيل كان سريع بزاف."
-                  rtl
-                />
-                <ReviewCard
-                  name="Nadia"
-                  city="Marrakech"
-                  text="Commande facile, confirmation par téléphone, rien à dire."
-                />
+                {(reviews || [
+                  {
+                    name: "Samira",
+                    city: "Rabat",
+                    text: "Très belle qualité, roues silencieuses. Livraison rapide.",
+                  },
+                  {
+                    name: "Fatima",
+                    city: "Rabat",
+                    text: "وصلاتني الفاليز بجودة فوق التوقعات، الرويدات خفاف والتوصيل كان سريع بزاف.",
+                    rtl: true,
+                  },
+                  {
+                    name: "Nadia",
+                    city: "Marrakech",
+                    text: "Commande facile, confirmation par téléphone, rien à dire.",
+                  },
+                ]).slice(0, 3).map((r) => (
+                  <ReviewCard
+                    key={`${r.name}_${r.city}`}
+                    name={r.name}
+                    city={r.city}
+                    text={r.text}
+                    rtl={Boolean(r.rtl)}
+                  />
+                ))}
               </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <SectionTitle
+              title="Livraison & paiement"
+              subtitle="Simple, rapide et sécurisé."
+            />
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <MiniInfo icon={<IconTruck />} title="Livraison gratuite" text="Partout au Maroc en 24–48h." />
+              <MiniInfo icon={<IconCoin />} title="Paiement à la livraison" text="Vous payez à la réception." />
+              <MiniInfo icon={<IconPhone />} title="Confirmation" text="Validation par téléphone." />
+              <MiniInfo icon={<IconWhatsApp />} title="Support WhatsApp" text="Réponse rapide en cas de besoin." />
             </div>
           </section>
 
@@ -595,60 +1182,110 @@ export function ProductPage({
           <section>
             <SectionTitle title="FAQ" subtitle="Réponses rapides." />
             <div className="grid gap-2">
-              <FaqItem
-                q="Livraison"
-                a="Livraison partout au Maroc. Les délais varient selon la ville et la disponibilité."
-              />
-              <FaqItem
-                q="Paiement"
-                a="Paiement à la livraison (COD). Vous payez à la réception du colis."
-              />
-              <FaqItem
-                q="Commande"
-                a="Choisissez taille/couleur, puis cliquez sur « Envoyer la demande par email »."
-              />
-              <FaqItem
-                q="Échange"
-                a="Échange possible sous 7 jours selon l’état du produit. Contactez-nous pour la procédure."
-              />
+              {(faqs || [
+                {
+                  q: "Livraison",
+                  a: "Livraison partout au Maroc. Les délais varient selon la ville et la disponibilité.",
+                },
+                {
+                  q: "Paiement",
+                  a: "Paiement à la livraison (COD). Vous payez à la réception du colis.",
+                },
+                {
+                  q: "Commande",
+                  a: "Choisissez taille/couleur, puis cliquez sur « Commander maintenant ».",
+                },
+                {
+                  q: "Échange",
+                  a: "Échange possible sous 7 jours selon l’état du produit. Contactez-nous pour la procédure.",
+                },
+              ]).map((f) => (
+                <FaqItem key={f.q} q={f.q} a={f.a} />
+              ))}
             </div>
           </section>
         </div>
       </div>
 
-      {zoomOpen ? (
+      {/* 2) Mobile sticky bottom CTA */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 backdrop-blur lg:hidden">
+        <div className="mx-auto w-full max-w-[1400px] px-4 py-3.5 sm:px-6">
+          <button
+            type="button"
+            onClick={onCommanderNowClick}
+            disabled={!productAvailable}
+            className={[
+              "inline-flex w-full items-center justify-center",
+              "rounded-3xl px-5 py-4 text-sm font-extrabold text-white",
+              "bg-gradient-to-b from-emerald-600 to-emerald-700",
+              "shadow-sm shadow-emerald-600/20 transition",
+              "hover:from-emerald-600 hover:to-emerald-800 hover:shadow-md",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40",
+              !productAvailable ? "opacity-50" : "",
+            ].join(" ")}
+          >
+            {productAvailable ? "Commander maintenant" : "Produit indisponible"}
+          </button>
+        </div>
+      </div>
+
+      {/* Detail lightbox (for "Galerie détails") */}
+      {detailsOpen && detailImages.length ? (
         <div className="fixed inset-0 z-50">
-          <div
+          <button
+            type="button"
             className="absolute inset-0 bg-black/70"
-            onClick={() => setZoomOpen(false)}
-            aria-hidden
+            onClick={() => setDetailsOpen(false)}
+            aria-label="Fermer"
           />
-          <div className="absolute inset-x-0 top-0 mx-auto flex h-full w-full max-w-5xl items-center justify-center p-4">
+          <div className="absolute inset-x-0 top-0 mx-auto flex h-full w-full max-w-6xl items-center justify-center p-4">
             <div className="relative w-full overflow-hidden rounded-3xl bg-black">
-              <button
-                type="button"
-                onClick={() => setZoomOpen(false)}
-                className="absolute right-3 top-3 z-10 rounded-full bg-white/10 px-3 py-2 text-sm font-semibold text-white backdrop-blur hover:bg-white/20"
-              >
-                Fermer
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoomScale((s) => (s === 1 ? 1.6 : 1))}
-                className="absolute left-3 top-3 z-10 rounded-full bg-white/10 px-3 py-2 text-sm font-semibold text-white backdrop-blur hover:bg-white/20"
-              >
-                {zoomScale === 1 ? "Zoom +" : "Zoom −"}
-              </button>
-              <div className="relative aspect-[4/3] w-full">
+              <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
+                  className="rounded-full bg-white/10 px-3 py-2 text-sm font-semibold text-white backdrop-blur hover:bg-white/20"
+                >
+                  Fermer
+                </button>
+              </div>
+              <div className="relative h-[70vh] w-full">
                 <Image
-                  src={selectedImage}
+                  src={detailImages[detailsIndex] || detailImages[0]!}
                   alt={product.name}
                   fill
-                  className="object-contain transition-transform duration-200"
-                  style={{ transform: `scale(${zoomScale})` }}
+                  className="object-contain"
                   sizes="100vw"
+                  priority
                 />
               </div>
+              {detailImages.length > 1 ? (
+                <div className="flex gap-2 overflow-x-auto border-t border-white/10 bg-black/40 p-3">
+                  {detailImages.map((src, idx) => {
+                    const active = idx === detailsIndex;
+                    return (
+                      <button
+                        key={`d_${src}_${idx}`}
+                        type="button"
+                        onClick={() => setDetailsIndex(idx)}
+                        className={[
+                          "relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl ring-1 ring-inset transition",
+                          active ? "ring-white" : "ring-white/20 hover:ring-white/40",
+                        ].join(" ")}
+                        aria-pressed={active}
+                      >
+                        <Image
+                          src={src}
+                          alt=""
+                          fill
+                          className="object-contain p-2"
+                          sizes="64px"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -659,6 +1296,109 @@ export function ProductPage({
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="text-sm font-semibold text-zinc-900">{children}</div>;
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700">
+      {children}
+    </div>
+  );
+}
+
+function StockBadge({ available }: { available: boolean }) {
+  if (!available) {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
+        <span>Rupture de stock</span>
+      </div>
+    );
+  }
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800">
+      <span>En stock</span>
+    </div>
+  );
+}
+
+function BulletCard({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
+      <div className="text-sm font-semibold text-zinc-900">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-zinc-600">{text}</div>
+    </div>
+  );
+}
+
+function MiniInfo({
+  icon,
+  title,
+  text,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-3xl border border-zinc-200 bg-zinc-50 p-4">
+      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white ring-1 ring-zinc-200 text-zinc-900">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-zinc-900">{title}</div>
+        <div className="mt-1 text-sm leading-6 text-zinc-600">{text}</div>
+      </div>
+    </div>
+  );
+}
+
+function formatDh(value: number) {
+  const n = Number.isFinite(value) ? Math.round(value) : 0;
+  return `${n.toLocaleString("fr-FR")} DH`;
+}
+
+function PriceLine({
+  price,
+  oldPrice,
+  label,
+  variant = "default",
+}: {
+  price: number;
+  oldPrice: number | null;
+  label: string;
+  variant?: "default" | "order";
+}) {
+  const showOld = typeof oldPrice === "number" && oldPrice > price;
+  const compact = variant === "order";
+  return (
+    <div className={compact ? "flex items-end justify-between gap-3" : ""}>
+      <div
+        className={
+          compact
+            ? "text-xs font-medium text-zinc-600"
+            : "text-sm font-medium text-zinc-600"
+        }
+      >
+        {label}
+      </div>
+      <div className={compact ? "flex items-end gap-2" : "mt-1 flex items-end gap-2"}>
+        {showOld ? (
+          <div className="text-sm font-semibold text-zinc-400 line-through">
+            {formatDh(oldPrice!)}
+          </div>
+        ) : null}
+        <div
+          className={
+            compact
+              ? "text-[30px] font-extrabold tracking-tight text-[#009B5A] leading-none"
+              : "text-2xl font-semibold tracking-tight text-zinc-900"
+          }
+        >
+          {formatDh(price)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SectionTitle({
@@ -862,6 +1602,54 @@ function IconMaterial() {
   );
 }
 
+function IconCoin() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 20c4.42 0 8-2.24 8-5s-3.58-5-8-5-8 2.24-8 5 3.58 5 8 5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M4 15v-6c0-2.76 3.58-5 8-5s8 2.24 8 5v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPhone() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M7 4h4l1 5-2 1c1 2.6 3 4.6 5.6 5.6l1-2 5 1v4c0 1.1-.9 2-2 2C10.4 21 3 13.6 3 4c0-1.1.9-2 2-2h2Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconWhatsApp() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        d="M16 3C8.82 3 3 8.82 3 16c0 2.2.58 4.34 1.68 6.24L3.58 28.6a1 1 0 0 0 1.22 1.22l6.36-1.1A12.94 12.94 0 0 0 16 29c7.18 0 13-5.82 13-13S23.18 3 16 3Zm0 23.5c-2.12 0-4.2-.56-6.02-1.62a1 1 0 0 0-.7-.1l-3.78.66.66-3.78a1 1 0 0 0-.1-.7A11.5 11.5 0 1 1 16 26.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M19.11 17.4c-.28-.14-1.64-.8-1.9-.9s-.44-.14-.63.14-.72.9-.88 1.08-.32.2-.6.06a7.62 7.62 0 0 1-2.24-1.38 8.42 8.42 0 0 1-1.56-1.94c-.16-.28 0-.44.12-.58.12-.12.28-.32.42-.48.14-.16.18-.28.28-.46.1-.18.06-.36 0-.5s-.63-1.52-.86-2.08c-.22-.52-.44-.46-.63-.46h-.54c-.18 0-.5.06-.76.36-.26.28-1 1-.98 2.44s1 2.84 1.14 3.04c.14.2 1.98 3.02 4.8 4.24.68.3 1.22.48 1.64.62.7.22 1.34.2 1.84.12.56-.08 1.64-.66 1.88-1.28.24-.62.24-1.14.16-1.28-.08-.14-.26-.2-.54-.34Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function IconTruck() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1051,7 +1839,7 @@ function HorizontalCarousel({ children }: { children: React.ReactNode }) {
       ].join(" ")}
       style={{
         WebkitOverflowScrolling: "touch",
-        touchAction: "pan-x",
+        touchAction: "pan-x pan-y",
       }}
     >
       <style jsx>{`
@@ -1066,10 +1854,7 @@ function HorizontalCarousel({ children }: { children: React.ReactNode }) {
 }
 
 function firstAvailableSizeKey(variant: ProductVariant): SizeKey {
-  const order: SizeKey[] = ["20", "24", "28", "pack3"];
-  for (const k of order) {
-    const s = variant.sizes[k];
-    if (s && s.inStock) return k;
-  }
+  // Size availability is global on product; default to 20".
+  void variant;
   return "20";
 }

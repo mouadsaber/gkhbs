@@ -16,7 +16,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const pixelId = process.env.NEXT_PUBLIC_FACEBOOK_PIXEL_ID || "1299813991699658";
+  const pixelId = process.env.NEXT_PUBLIC_FACEBOOK_PIXEL_ID || "2376048099583195";
   return (
     <html lang="fr" className="antialiased overflow-x-hidden" suppressHydrationWarning>
       <body className="flex flex-col overflow-x-hidden" suppressHydrationWarning>

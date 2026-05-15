@@ -4,7 +4,6 @@ import "./globals.css";
 import { SiteHeader } from "@/components/site/SiteHeader";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { WhatsAppHelpFab } from "@/components/site/WhatsAppHelpFab";
-import { MetaPixelPageView } from "@/components/site/MetaPixelPageView";
 
 export const metadata: Metadata = {
   title: "GK Valises | Boutique Premium",
@@ -17,7 +16,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const pixelId = process.env.NEXT_PUBLIC_FACEBOOK_PIXEL_ID;
+  const pixelId = process.env.NEXT_PUBLIC_FACEBOOK_PIXEL_ID || "1299813991699658";
   return (
     <html lang="fr" className="antialiased overflow-x-hidden" suppressHydrationWarning>
       <body className="flex flex-col overflow-x-hidden" suppressHydrationWarning>
@@ -25,7 +24,6 @@ export default function RootLayout({
         <main className="flex-1 pb-32 sm:pb-0">{children}</main>
         <SiteFooter />
         <WhatsAppHelpFab />
-        <MetaPixelPageView />
         {pixelId ? (
           <>
             <Script

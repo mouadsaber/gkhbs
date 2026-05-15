@@ -7,7 +7,7 @@ import type { Product, ProductVariant, SizeKey } from "@/lib/productTypes";
 import { SIZE_CONFIG } from "@/lib/productTypes";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { ProductGallery } from "@/components/product/ProductGallery";
-import { trackAddToCart, trackPurchase, trackViewContent } from "@/lib/metaPixel";
+import { trackAddToCart, trackLead, trackViewContent } from "@/lib/metaPixel";
 
 export function ProductPage({
   product,
@@ -157,7 +157,7 @@ export function ProductPage({
     trackViewContent({
       contentName: product.name,
       contentIds: [product.slug || product.reference].filter(Boolean),
-      value: Math.max(0, totalPrice),
+      value: Math.max(0, selectedPrice),
       currency: "MAD",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,6 +237,7 @@ export function ProductPage({
       return;
     }
 
+    // COD flow: AddToCart when user clicks order button (i.e. submits the order).
     trackAddToCart({
       contentName: product.name,
       contentIds: [product.slug || product.reference].filter(Boolean),
@@ -273,7 +274,8 @@ export function ProductPage({
         );
         return;
       }
-      trackPurchase({
+      // COD flow: Lead after successful submission.
+      trackLead({
         contentName: product.name,
         contentIds: [product.slug || product.reference].filter(Boolean),
         value: Math.max(0, totalPrice),

@@ -8,6 +8,7 @@ import { SIZE_CONFIG } from "@/lib/productTypes";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { ProductGallery } from "@/components/product/ProductGallery";
 import { trackAddToCart, trackLead, trackViewContent } from "@/lib/metaPixel";
+import { getSizeConfig } from "@/lib/sizeConfig";
 
 export function ProductPage({
   product,
@@ -93,7 +94,7 @@ export function ProductPage({
     selectedKeys.length === 0
       ? "Sélectionnez une taille"
       : selectedKeys.length === 1
-        ? SIZE_CONFIG[selectedKeys[0] as SizeKey].label
+        ? getSizeConfig(product, selectedKeys[0] as SizeKey).label
         : `${selectedKeys.length} tailles sélectionnées`;
   const selectedOldPrice =
     selectedKeys.length === 1 &&
@@ -154,9 +155,11 @@ export function ProductPage({
   }, [autoOpenOrder]);
 
   useEffect(() => {
+    const defaultLabel = getSizeConfig(product, "20").label;
     trackViewContent({
-      contentName: product.name,
-      contentIds: [product.slug || product.reference].filter(Boolean),
+      contentName: `${product.name} — ${defaultLabel}`,
+      contentIds: [product.reference].filter(Boolean),
+      contentType: "product",
       value: Math.max(0, selectedPrice),
       currency: "MAD",
     });
@@ -239,9 +242,10 @@ export function ProductPage({
 
     // COD flow: AddToCart when user clicks order button (i.e. submits the order).
     trackAddToCart({
-      contentName: product.name,
-      contentIds: [product.slug || product.reference].filter(Boolean),
-      value: Math.max(0, totalPrice),
+      contentName: `${product.name} — ${selectedSizeLabel}`,
+      contentIds: [product.reference].filter(Boolean),
+      contentType: "product",
+      value: Math.max(0, selectedPrice),
       currency: "MAD",
     });
 
@@ -250,22 +254,22 @@ export function ProductPage({
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fullName: normalizedName,
-          phone: normalizedPhone,
-          city: normalizedCity,
-          productName: product.name,
-          reference: product.reference,
-          productImage:
-            (variant.media || []).find((m) => m.type === "image")?.url ||
-            variant.images?.[0] ||
-            "",
-          color: variant.colorName,
-          size: selectedKeys.map((k) => SIZE_CONFIG[k].label).join(" + "),
-          unitPrice: selectedPrice,
-          quantity: qty,
-        }),
-      });
+          body: JSON.stringify({
+            fullName: normalizedName,
+            phone: normalizedPhone,
+            city: normalizedCity,
+            productName: product.name,
+            reference: product.reference,
+            productImage:
+              (variant.media || []).find((m) => m.type === "image")?.url ||
+              variant.images?.[0] ||
+              "",
+            color: variant.colorName,
+            size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + "),
+            unitPrice: selectedPrice,
+            quantity: qty,
+          }),
+        });
       if (!res.ok) {
         const errorText = await res.text();
         console.error("Orders API error:", errorText);
@@ -276,8 +280,16 @@ export function ProductPage({
       }
       // COD flow: Lead after successful submission.
       trackLead({
-        contentName: product.name,
-        contentIds: [product.slug || product.reference].filter(Boolean),
+        contentName: `${product.name} — ${selectedSizeLabel}`,
+        contentIds: [product.reference].filter(Boolean),
+        contentType: "product",
+        contents: [
+          {
+            id: product.reference,
+            quantity: safeQuantity,
+            item_price: Math.max(0, selectedPrice),
+          },
+        ],
         value: Math.max(0, totalPrice),
         currency: "MAD",
       });
@@ -406,7 +418,7 @@ export function ProductPage({
                       Object.keys(SIZE_CONFIG) as Array<keyof typeof SIZE_CONFIG>
                     ).map((k) => {
                       const key = k as SizeKey;
-                      const cfg = SIZE_CONFIG[key];
+                      const cfg = getSizeConfig(product, key);
                       const s = product.sizes[key];
                       const disabled = !s?.inStock;
                       const active = selectedSizeKeys.has(key);
@@ -832,7 +844,7 @@ export function ProductPage({
                       Object.keys(SIZE_CONFIG) as Array<keyof typeof SIZE_CONFIG>
                     ).map((k) => {
                       const key = k as SizeKey;
-                      const cfg = SIZE_CONFIG[key];
+                      const cfg = getSizeConfig(product, key);
                       const s = product.sizes[key];
                       const disabled = !s?.inStock;
                       const active = selectedSizeKeys.has(key);

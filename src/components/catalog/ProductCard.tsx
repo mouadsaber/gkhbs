@@ -21,8 +21,12 @@ export function ProductCard({ product }: { product: Product }) {
     "/products/valise-cabine.svg";
   const safeMainImage = mainImage && mainImage.trim().length ? mainImage : "/products/valise-cabine.svg";
 
-  const minPrice = (() => {
+  // Keep product cards consistent with product page default selection (20" Cabine).
+  const defaultPrice = (() => {
     const sizes = product.sizes;
+    const p20 = Number(sizes?.["20"]?.price || 0);
+    if (Number.isFinite(p20) && p20 > 0) return p20;
+    // Fallback for legacy/incomplete data: use the minimum positive price.
     if (!sizes) return 0;
     const vals = Object.values(sizes)
       .map((s) => Number(s?.price || 0))
@@ -131,9 +135,9 @@ export function ProductCard({ product }: { product: Product }) {
           {product.stockText || "Stock limité"}
         </div>
 
-        {minPrice ? (
+        {defaultPrice ? (
           <div className="mt-2 text-sm font-semibold text-zinc-900">
-            À partir de <span className="text-[#009B5A]">{formatDh(minPrice)}</span>
+            <span className="text-[#009B5A]">{formatDh(defaultPrice)}</span>
           </div>
         ) : null}
 

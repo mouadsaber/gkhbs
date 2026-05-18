@@ -27,15 +27,41 @@ export default function RootLayout({
         {pixelId ? (
           <>
             <Script
+              id="meta-pixel-stub"
+              strategy="beforeInteractive"
+              dangerouslySetInnerHTML={{
+                __html: `
+// Create fbq queue early so events in first paint aren't dropped.
+!function(f,b,e,v,n,t,s){
+  if(!f.fbq){
+    n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;
+    n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];
+  }
+}(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
+                `,
+              }}
+            />
+            <Script
               id="meta-pixel"
               strategy="afterInteractive"
               dangerouslySetInnerHTML={{
                 __html: `
-!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
-n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
-n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
-t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window, document,'script',
-'https://connect.facebook.net/en_US/fbevents.js');
+!function(f,b,e,v,n,t,s){
+  // Ensure fbq exists (queue) but always load the library script.
+  if(!f.fbq){
+    n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;
+    n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];
+  }
+  if(!f.__fbqScriptLoaded){
+    t=b.createElement(e);t.async=!0;t.src=v;
+    s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);
+    f.__fbqScriptLoaded=true;
+  }
+}(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
 fbq('init', '${pixelId}');
 fbq('track', 'PageView');
                 `,

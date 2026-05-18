@@ -296,7 +296,7 @@ export async function POST(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, orderNumber });
+  return NextResponse.json({ ok: true, orderNumber, emailSent: true });
 }
 
 function escapeHtml(value: string) {

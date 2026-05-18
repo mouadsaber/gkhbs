@@ -7,7 +7,13 @@ import type { Product, ProductVariant, SizeKey } from "@/lib/productTypes";
 import { SIZE_CONFIG } from "@/lib/productTypes";
 import { ProductCard } from "@/components/catalog/ProductCard";
 import { ProductGallery } from "@/components/product/ProductGallery";
-import { trackAddToCart, trackLead, trackViewContent } from "@/lib/metaPixel";
+import {
+  trackAddToCart,
+  trackInitiateCheckout,
+  trackLead,
+  trackPurchase,
+  trackViewContent,
+} from "@/lib/metaPixel";
 import { getSizeConfig } from "@/lib/sizeConfig";
 
 export function ProductPage({
@@ -64,6 +70,8 @@ export function ProductPage({
   const [formError, setFormError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const purchaseFiredRef = useRef(false);
+  const initiateFiredRef = useRef(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
   const cityInputRef = useRef<HTMLInputElement | null>(null);
@@ -140,6 +148,25 @@ export function ProductPage({
     window.setTimeout(() => input?.focus(), 250);
   }
 
+  function fireInitiateCheckoutOnce() {
+    if (initiateFiredRef.current) return;
+    initiateFiredRef.current = true;
+    const sizeLabel = selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + ");
+    trackInitiateCheckout({
+      contentName: product.name,
+      contentIds: [product.reference].filter(Boolean),
+      contentType: "product",
+      value: Math.max(0, totalPrice),
+      currency: "MAD",
+      extra: {
+        product_ref: product.reference,
+        size: sizeLabel || undefined,
+        color: variant?.colorName || undefined,
+        quantity: safeQuantity,
+      },
+    });
+  }
+
   const detailImages = (variant.media || [])
     .filter((m) => m.type === "image")
     .map((m) => m.url)
@@ -151,6 +178,7 @@ export function ProductPage({
       const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
       const target = isDesktop ? demandeDesktopRef.current : demandeMobileRef.current;
       target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      fireInitiateCheckoutOnce();
     }, 0);
   }, [autoOpenOrder]);
 
@@ -162,6 +190,12 @@ export function ProductPage({
       contentType: "product",
       value: Math.max(0, selectedPrice),
       currency: "MAD",
+      extra: {
+        product_ref: product.reference,
+        size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + ") || undefined,
+        color: variant?.colorName || undefined,
+        quantity: safeQuantity,
+      },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.slug, product.reference]);
@@ -240,6 +274,8 @@ export function ProductPage({
       return;
     }
 
+    fireInitiateCheckoutOnce();
+
     // COD flow: AddToCart when user clicks order button (i.e. submits the order).
     trackAddToCart({
       contentName: `${product.name} — ${selectedSizeLabel}`,
@@ -247,6 +283,12 @@ export function ProductPage({
       contentType: "product",
       value: Math.max(0, selectedPrice),
       currency: "MAD",
+      extra: {
+        product_ref: product.reference,
+        size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + ") || undefined,
+        color: variant.colorName,
+        quantity: safeQuantity,
+      },
     });
 
     setSending(true);
@@ -254,7 +296,7 @@ export function ProductPage({
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
-          body: JSON.stringify({
+        body: JSON.stringify({
             fullName: normalizedName,
             phone: normalizedPhone,
             city: normalizedCity,
@@ -268,11 +310,21 @@ export function ProductPage({
             size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + "),
             unitPrice: selectedPrice,
             quantity: qty,
-          }),
-        });
+        }),
+      });
       if (!res.ok) {
         const errorText = await res.text();
         console.error("Orders API error:", errorText);
+        setFormError(
+          "Impossible d’envoyer la demande. Contactez-nous sur WhatsApp."
+        );
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as
+        | { ok?: boolean; orderNumber?: string; emailSent?: boolean }
+        | null;
+      if (!json?.ok || !json.orderNumber || !json.emailSent) {
+        console.error("Orders API invalid response:", json);
         setFormError(
           "Impossible d’envoyer la demande. Contactez-nous sur WhatsApp."
         );
@@ -292,7 +344,37 @@ export function ProductPage({
         ],
         value: Math.max(0, totalPrice),
         currency: "MAD",
+        extra: {
+          product_ref: product.reference,
+          size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + ") || undefined,
+          color: variant.colorName,
+          quantity: safeQuantity,
+        },
       });
+      // Purchase: only after order is saved AND email is sent successfully.
+      if (!purchaseFiredRef.current) {
+        purchaseFiredRef.current = true;
+        trackPurchase({
+          contentName: product.name,
+          contentIds: [product.reference].filter(Boolean),
+          contentType: "product",
+          contents: [
+            {
+              id: product.reference,
+              quantity: safeQuantity,
+              item_price: Math.max(0, selectedPrice),
+            },
+          ],
+          value: Math.max(0, totalPrice),
+          currency: "MAD",
+          extra: {
+            product_ref: product.reference,
+            size: selectedKeys.map((k) => getSizeConfig(product, k).label).join(" + ") || undefined,
+            color: variant.colorName,
+            quantity: safeQuantity,
+          },
+        });
+      }
       setSent(true);
     } catch (err) {
       console.error("[order] submit failed", err);
@@ -326,6 +408,7 @@ export function ProductPage({
       scrollToMissing("city");
       return;
     }
+    fireInitiateCheckoutOnce();
     // Everything valid -> submit immediately without scrolling away.
     void sendOrder();
   }
@@ -547,6 +630,7 @@ export function ProductPage({
                       ref={nameInputRef}
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="Votre nom"
                       autoComplete="name"
@@ -558,6 +642,7 @@ export function ProductPage({
                       ref={phoneInputRef}
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="06..."
                       autoComplete="tel"
@@ -569,6 +654,7 @@ export function ProductPage({
                       ref={cityInputRef}
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="Casablanca, Rabat..."
                       autoComplete="address-level2"
@@ -982,6 +1068,7 @@ export function ProductPage({
                       ref={nameInputRef}
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="Votre nom"
                       autoComplete="name"
@@ -993,6 +1080,7 @@ export function ProductPage({
                       ref={phoneInputRef}
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="06..."
                       autoComplete="tel"
@@ -1004,6 +1092,7 @@ export function ProductPage({
                       ref={cityInputRef}
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
+                      onFocus={fireInitiateCheckoutOnce}
                       className="mt-2 h-11 w-full rounded-2xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/15"
                       placeholder="Casablanca, Rabat..."
                       autoComplete="address-level2"

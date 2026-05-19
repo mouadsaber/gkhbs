@@ -368,9 +368,12 @@ export function ProductPage({
       // Purchase: only after order is saved AND email is sent successfully.
       if (!purchaseFiredRef.current) {
         purchaseFiredRef.current = true;
-        // Minimal Purchase payload (as requested).
+        console.log("[META] Purchase attempt", totalPrice);
         if (typeof window !== "undefined" && typeof window.fbq === "function") {
           window.fbq("track", "Purchase", { value: Math.max(0, totalPrice), currency: "MAD" });
+          console.log("[META] Purchase fired");
+        } else {
+          console.log("[META] fbq missing");
         }
         trackPurchase({
           contentName: product.name,

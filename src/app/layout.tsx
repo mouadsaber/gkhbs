@@ -4,6 +4,7 @@ import "./globals.css";
 import { SiteHeader } from "@/components/site/SiteHeader";
 import { SiteFooter } from "@/components/site/SiteFooter";
 import { WhatsAppHelpFab } from "@/components/site/WhatsAppHelpFab";
+import { MetaPixelDebug } from "@/components/site/MetaPixelDebug";
 
 export const metadata: Metadata = {
   title: "GK Valises | Boutique Premium",
@@ -24,6 +25,7 @@ export default function RootLayout({
         <main className="flex-1 pb-32 sm:pb-0">{children}</main>
         <SiteFooter />
         <WhatsAppHelpFab />
+        <MetaPixelDebug />
         {pixelId ? (
           <>
             <Script

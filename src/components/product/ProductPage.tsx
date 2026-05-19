@@ -96,7 +96,8 @@ export function ProductPage({
     const p = product.sizes[k]?.price;
     return sum + (typeof p === "number" && Number.isFinite(p) ? p : 0);
   }, 0);
-  const safeQuantity = Number.isFinite(quantity) ? Math.max(1, quantity) : 1;
+  const clampQty = (n: number) => Math.min(99, Math.max(1, Math.trunc(n)));
+  const safeQuantity = Number.isFinite(quantity) ? clampQty(quantity) : 1;
   const totalPrice = Math.max(0, selectedPrice) * safeQuantity;
   const selectedSizeLabel =
     selectedKeys.length === 0
@@ -205,6 +206,19 @@ export function ProductPage({
     const t = window.setTimeout(() => setPricePulse(false), 220);
     return () => window.clearTimeout(t);
   }, [selectedSizeLabel, selectedPrice, safeQuantity]);
+
+  // Always reset quantity per product and keep quantity state clamped.
+  useEffect(() => {
+    setQuantity(1);
+    purchaseFiredRef.current = false;
+    initiateFiredRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product.reference]);
+
+  useEffect(() => {
+    if (quantity !== safeQuantity) setQuantity(safeQuantity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeQuantity]);
 
   function toggleSize(key: SizeKey) {
     const s = product.sizes[key];
@@ -354,6 +368,10 @@ export function ProductPage({
       // Purchase: only after order is saved AND email is sent successfully.
       if (!purchaseFiredRef.current) {
         purchaseFiredRef.current = true;
+        // Minimal Purchase payload (as requested).
+        if (typeof window !== "undefined" && typeof window.fbq === "function") {
+          window.fbq("track", "Purchase", { value: Math.max(0, totalPrice), currency: "MAD" });
+        }
         trackPurchase({
           contentName: product.name,
           contentIds: [product.reference].filter(Boolean),
@@ -585,11 +603,17 @@ export function ProductPage({
                         "text-[28px]",
                         "transition-transform duration-200",
                         pricePulse ? "scale-[1.03]" : "scale-100",
-                      ].join(" ")}
-                    >
-                      {formatDh(totalPrice)}
+                    ].join(" ")}
+                  >
+                      {formatDh(selectedPrice)}
                     </div>
                   </div>
+                  {safeQuantity > 1 ? (
+                    <div className="mt-2 text-xs font-semibold text-zinc-600">
+                      Total :{" "}
+                      <span className="font-extrabold text-zinc-900">{formatDh(totalPrice)}</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -597,7 +621,7 @@ export function ProductPage({
                   <div className="mt-2 flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                      onClick={() => setQuantity((q) => clampQty(q - 1))}
                       className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
                       aria-label="Diminuer"
                     >
@@ -605,16 +629,16 @@ export function ProductPage({
                     </button>
                     <input
                       inputMode="numeric"
-                      value={quantity}
+                      value={safeQuantity}
                       onChange={(e) =>
-                        setQuantity(Math.max(1, Number(e.target.value || 1)))
+                        setQuantity(clampQty(Number(e.target.value || 1)))
                       }
                       className="h-11 w-16 rounded-2xl border border-zinc-200 bg-white text-center text-sm font-semibold text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/20"
                       aria-label="Quantité"
                     />
                     <button
                       type="button"
-                      onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                      onClick={() => setQuantity((q) => clampQty(q + 1))}
                       className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
                       aria-label="Augmenter"
                     >
@@ -854,35 +878,6 @@ export function ProductPage({
                 🚚 Livraison estimée : 24–48h
               </div>
 
-              <div className="mt-4 hidden rounded-3xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/70 to-white px-4 py-3 shadow-sm ring-1 ring-emerald-200/30 lg:block">
-                <div className="flex items-end justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="inline-flex rounded-full bg-emerald-600/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
-                      Prix sélectionné
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-zinc-900">
-                      {selectedSizeLabel}
-                    </div>
-                  </div>
-                  <div
-                    className={[
-                      "text-right font-extrabold leading-none tracking-tight text-[#009B5A]",
-                      "text-[28px] sm:text-[32px]",
-                      "transition-transform duration-200",
-                      pricePulse ? "scale-[1.03]" : "scale-100",
-                    ].join(" ")}
-                  >
-                    {formatDh(totalPrice)}
-                  </div>
-                </div>
-                {safeQuantity > 1 ? (
-                  <div className="mt-2 text-xs font-semibold text-zinc-600">
-                    {formatDh(selectedPrice)} × {safeQuantity} ={" "}
-                    <span className="font-extrabold text-zinc-900">{formatDh(totalPrice)}</span>
-                  </div>
-                ) : null}
-              </div>
-
               <div className="mt-5">
                 <Label>Couleur</Label>
                 <div ref={colorDesktopRef} className="mt-2 flex flex-wrap gap-2">
@@ -1015,9 +1010,9 @@ export function ProductPage({
                         "text-[28px] sm:text-[32px]",
                         "transition-transform duration-200",
                         pricePulse ? "scale-[1.03]" : "scale-100",
-                      ].join(" ")}
-                    >
-                      {formatDh(totalPrice)}
+                    ].join(" ")}
+                  >
+                      {formatDh(selectedPrice)}
                     </div>
                   </div>
                   {safeQuantity > 1 ? (
@@ -1035,7 +1030,7 @@ export function ProductPage({
                   <div className="mt-2 flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                      onClick={() => setQuantity((q) => clampQty(q - 1))}
                       className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
                       aria-label="Diminuer"
                     >
@@ -1043,16 +1038,16 @@ export function ProductPage({
                     </button>
                     <input
                       inputMode="numeric"
-                      value={quantity}
+                      value={safeQuantity}
                       onChange={(e) =>
-                        setQuantity(Math.max(1, Number(e.target.value || 1)))
+                        setQuantity(clampQty(Number(e.target.value || 1)))
                       }
                       className="h-11 w-16 rounded-2xl border border-zinc-200 bg-white text-center text-sm font-semibold text-zinc-900 outline-none focus:ring-2 focus:ring-zinc-900/20"
                       aria-label="Quantité"
                     />
                     <button
                       type="button"
-                      onClick={() => setQuantity((q) => Math.min(99, q + 1))}
+                      onClick={() => setQuantity((q) => clampQty(q + 1))}
                       className="h-11 w-11 rounded-2xl border border-zinc-200 bg-white text-lg font-semibold text-zinc-900 hover:bg-zinc-50"
                       aria-label="Augmenter"
                     >

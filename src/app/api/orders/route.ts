@@ -5,6 +5,7 @@ import path from "node:path";
 import { isDbConfigured } from "@/lib/db";
 import { createOrderInDb } from "@/lib/ordersDb";
 import { getUploadsDir, safeUploadsFilename } from "@/lib/uploads";
+import { sendCapiPurchase } from "@/lib/metaCapi";
 
 type OrderRecord = {
   orderNumber: string;
@@ -68,6 +69,8 @@ export async function POST(req: Request) {
   const pass = process.env.SMTP_PASS;
   const orderEmail = process.env.ORDER_EMAIL || "contact@gkhbs.com";
   const from = process.env.SMTP_FROM || `"GKHBS Orders" <${user || ""}>`;
+  const pixelId = process.env.NEXT_PUBLIC_FACEBOOK_PIXEL_ID || "";
+  const capiToken = process.env.FACEBOOK_CAPI_ACCESS_TOKEN || "";
 
   const requiredEnv: Array<[string, string | undefined]> = [
     ["SMTP_HOST", host],
@@ -294,6 +297,46 @@ export async function POST(req: Request) {
       { error: "send_failed", detail: error?.message || "Unknown SMTP error" },
       { status: 500 }
     );
+  }
+
+  // Optional: Conversions API Purchase (only if configured).
+  if (pixelId && capiToken) {
+    try {
+      const cookieHeader = req.headers.get("cookie") || "";
+      const fbp = /(?:^|;\s*)_fbp=([^;]+)/.exec(cookieHeader)?.[1];
+      const fbc = /(?:^|;\s*)_fbc=([^;]+)/.exec(cookieHeader)?.[1];
+      const ua = req.headers.get("user-agent") || "";
+      const ip =
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        req.headers.get("x-real-ip") ||
+        undefined;
+      const origin = getRequestOrigin(req) || "https://valisemaroc.com";
+      const sourceUrl = req.headers.get("referer") || `${origin}/produit/${encodeURIComponent(reference)}`;
+
+      const capiRes = await sendCapiPurchase({
+        pixelId,
+        accessToken: capiToken,
+        eventSourceUrl: sourceUrl,
+        actionSource: "website",
+        userData: {
+          client_ip_address: ip,
+          client_user_agent: ua,
+          fbp,
+          fbc,
+        },
+        customData: {
+          currency: "MAD",
+          value: subtotal,
+          content_name: productName,
+          content_ids: [reference],
+          content_type: "product",
+          contents: [{ id: reference, quantity, item_price: unitPrice }],
+        },
+      });
+      console.log("[orders] CAPI Purchase ok:", capiRes.slice(0, 200));
+    } catch (err) {
+      console.error("[orders] CAPI Purchase failed:", err);
+    }
   }
 
   return NextResponse.json({ ok: true, orderNumber, emailSent: true });

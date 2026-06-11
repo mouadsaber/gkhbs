@@ -13,6 +13,8 @@ export const metadata: Metadata = {
     "Boutique premium de valises au Maroc. Catalogue clean, pages produits, commande en quelques secondes.",
 };
 
+const GOOGLE_ADS_TAG_ID = "AW-18216487066";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -100,6 +102,19 @@ console.log('[META] pixel init done', typeof window !== 'undefined' ? typeof (wi
           </>
         ) : null}
       </body>
+      <Script
+        id="google-ads-tag"
+        src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_TAG_ID}`}
+        strategy="afterInteractive"
+      />
+      <Script id="google-ads-init" strategy="afterInteractive">
+        {`
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${GOOGLE_ADS_TAG_ID}');
+        `}
+      </Script>
     </html>
   );
 }

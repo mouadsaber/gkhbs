@@ -85,7 +85,7 @@ s.parentNode.insertBefore(t,s)}(window, document,'script',
 'https://connect.facebook.net/en_US/fbevents.js');
 fbq('init', '${pixelId}');
 fbq('track', 'PageView');
-console.log('[META] pixel init done', typeof window !== 'undefined' ? typeof (window as any).fbq : 'server');
+console.log('[META] pixel init done', typeof window !== 'undefined' ? typeof window.fbq : 'server');
                 `,
               }}
             />

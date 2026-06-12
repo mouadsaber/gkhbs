@@ -27,7 +27,7 @@ export default function RootLayout({
       <body className="flex flex-col overflow-x-hidden" suppressHydrationWarning>
         <Script
           id="google-ads-init"
-          strategy="beforeInteractive"
+          strategy="afterInteractive"
           dangerouslySetInnerHTML={{
             __html: `
 window.dataLayer = window.dataLayer || [];
@@ -40,7 +40,7 @@ gtag('config', '${GOOGLE_ADS_TAG_ID}');
         <Script
           id="google-ads-tag"
           src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_TAG_ID}`}
-          strategy="beforeInteractive"
+          strategy="afterInteractive"
         />
         <SiteHeader />
         <main className="flex-1 pb-32 sm:pb-0">{children}</main>

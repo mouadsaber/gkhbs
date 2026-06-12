@@ -25,6 +25,19 @@ export default function RootLayout({
   return (
     <html lang="fr" className="antialiased overflow-x-hidden" suppressHydrationWarning>
       <body className="flex flex-col overflow-x-hidden" suppressHydrationWarning>
+        <Script id="google-ads-init" strategy="afterInteractive">
+          {`
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${GOOGLE_ADS_TAG_ID}');
+          `}
+        </Script>
+        <Script
+          id="google-ads-tag"
+          src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_TAG_ID}`}
+          strategy="afterInteractive"
+        />
         <SiteHeader />
         <main className="flex-1 pb-32 sm:pb-0">{children}</main>
         <SiteFooter />
@@ -102,19 +115,6 @@ console.log('[META] pixel init done', typeof window !== 'undefined' ? typeof win
           </>
         ) : null}
       </body>
-      <Script
-        id="google-ads-tag"
-        src={`https://www.googletagmanager.com/gtag/js?id=${GOOGLE_ADS_TAG_ID}`}
-        strategy="afterInteractive"
-      />
-      <Script id="google-ads-init" strategy="afterInteractive">
-        {`
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', '${GOOGLE_ADS_TAG_ID}');
-        `}
-      </Script>
     </html>
   );
 }

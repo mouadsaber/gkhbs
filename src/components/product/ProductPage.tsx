@@ -16,6 +16,24 @@ import {
 } from "@/lib/metaPixel";
 import { getSizeConfig } from "@/lib/sizeConfig";
 
+declare global {
+  interface Window {
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
+function trackGoogleAdsLeadConversion() {
+  if (typeof window.gtag !== "function") {
+    console.warn("[googleAds] gtag unavailable; conversion was not sent");
+    return false;
+  }
+
+  window.gtag("event", "conversion", {
+    send_to: "AW-18216487066/wYyQCP3cyrkcEJqRpu5D",
+  });
+  return true;
+}
+
 export function ProductPage({
   product,
   similarProducts,
@@ -70,6 +88,7 @@ export function ProductPage({
   const [formError, setFormError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const googleAdsConversionFiredRef = useRef(false);
   const purchaseFiredRef = useRef(false);
   const initiateFiredRef = useRef(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +229,7 @@ export function ProductPage({
   // Always reset quantity per product and keep quantity state clamped.
   useEffect(() => {
     setQuantity(1);
+    googleAdsConversionFiredRef.current = false;
     purchaseFiredRef.current = false;
     initiateFiredRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,6 +363,9 @@ export function ProductPage({
           "Impossible d’envoyer la demande. Contactez-nous sur WhatsApp."
         );
         return;
+      }
+      if (!googleAdsConversionFiredRef.current) {
+        googleAdsConversionFiredRef.current = trackGoogleAdsLeadConversion();
       }
       // COD flow: Lead after successful submission.
       trackLead({
